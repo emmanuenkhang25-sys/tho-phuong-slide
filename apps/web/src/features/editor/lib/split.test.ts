@@ -176,10 +176,11 @@ describe('scaleDraftFonts', () => {
     });
   });
 
-  it('FONT_SIZE_PRESETS có 3 mức, dòng/slide giảm dần khi chữ to dần', () => {
+  it('FONT_SIZE_PRESETS có 3 mức, slide bài hát tối đa 3 dòng, chữ to dần thì dòng không tăng', () => {
     expect(FONT_SIZE_PRESETS.map((p) => p.id)).toEqual(['vua', 'to', 'cuc-to']);
     const lines = FONT_SIZE_PRESETS.map((p) => p.linesPerSlide);
-    expect(lines).toEqual([4, 3, 2]);
+    expect(lines).toEqual([3, 3, 2]);
+    expect(Math.max(...lines)).toBeLessThanOrEqual(3);
     const scales = FONT_SIZE_PRESETS.map((p) => p.fontScale);
     expect(scales[0]).toBeLessThan(scales[1]);
     expect(scales[1]).toBeLessThan(scales[2]);

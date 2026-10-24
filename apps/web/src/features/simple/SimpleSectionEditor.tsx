@@ -108,7 +108,8 @@ export function SimpleSectionEditor() {
   const [customBg, setCustomBg] = useState<SlideBackground | null>(null);
   const [bgBusy, setBgBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const [editSlides, setEditSlides] = useState(false);
+  /** Slide đang sửa chữ tại chỗ (null = không sửa slide nào). */
+  const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [previewIdx, setPreviewIdx] = useState<number | null>(null);
 
   const editorType: SectionEditorType = useMemo(
@@ -200,7 +201,8 @@ export function SimpleSectionEditor() {
     let res: { title?: string; slides: SlideDraft[] };
     if (editorType === 'lyrics') {
       const r = splitLyrics(content, {
-        linesPerSlide: fontPreset.linesPerSlide,
+        // Slide bài hát tối đa 3 dòng — preset nào cũng không vượt quá.
+        linesPerSlide: Math.min(fontPreset.linesPerSlide, 3),
         title: songTitle.trim() || section?.title,
         background,
       });
@@ -257,7 +259,7 @@ export function SimpleSectionEditor() {
     basesRef.current = fresh.map((d) => d.objects.map((o) => o.fontSize ?? 0));
     setDraftScales(fresh.map(() => 1));
     setDrafts(fresh);
-    setEditSlides(false);
+    setEditingIdx(null);
     toast(`Đã tạo ${res.slides.length} slide. Bấm “Lưu nội dung” để lưu.`, 'success');
   };
 
@@ -569,7 +571,8 @@ export function SimpleSectionEditor() {
                       : 'border-white/10 text-slate-400')
                   }
                 >
-                  {fp.id === 'vua' ? '🔤 Vừa' : fp.id === 'to' ? '🔠 To' : '🔡 Cực to'}
+                  {fp.id === 'vua' ? '🔤' : fp.id === 'to' ? '🔠' : '🔡'} {fp.label} ·{' '}
+                  {fp.linesPerSlide} dòng
                 </button>
               ))}
             </div>
@@ -650,53 +653,60 @@ export function SimpleSectionEditor() {
       {/* Bản xem trước các slide vừa tạo */}
       {drafts && (
         <div className="mt-3 rounded-2xl border border-white/5 bg-[#16181c] p-4">
-          <div className="mb-2 flex items-center justify-between">
-            <h3 className="text-base font-bold text-white">
-              Xem trước ({drafts.length} slide)
-            </h3>
-            <button
-              onClick={() => setEditSlides((v) => !v)}
-              className="rounded-xl border border-white/10 px-3 py-2 text-sm font-bold text-slate-300 min-h-[44px]"
-            >
-              {editSlides ? '✓ Xong' : '✏️ Chỉnh sửa slide'}
-            </button>
-          </div>
+          <h3 className="mb-2 text-base font-bold text-white">
+            Xem trước ({drafts.length} slide)
+          </h3>
           <div className="flex flex-col gap-3">
             {drafts.map((d, i) => (
               <div key={i} className="rounded-xl border border-white/10 p-2">
                 <div className="mb-1 flex items-center justify-between gap-2">
                   <p className="text-xs font-bold text-slate-500">Slide {i + 1}</p>
-                  <div
-                    className="flex items-center gap-1"
-                    role="group"
-                    aria-label={`Cỡ chữ slide ${i + 1}`}
-                  >
-                    {(
-                      [
-                        ['Nhỏ', 0.8],
-                        ['Vừa', 1],
-                        ['To', 1.25],
-                      ] as const
-                    ).map(([label, scale]) => (
-                      <button
-                        key={label}
-                        type="button"
-                        onClick={() => setDraftFontScale(i, scale)}
-                        aria-pressed={(draftScales[i] ?? 1) === scale}
-                        className={
-                          'min-h-[36px] rounded-lg border px-2.5 text-xs font-bold ' +
-                          ((draftScales[i] ?? 1) === scale
-                            ? 'border-violet-500 bg-violet-500/20 text-violet-200'
-                            : 'border-white/10 text-slate-400')
-                        }
-                      >
-                        {label}
-                      </button>
-                    ))}
+                  <div className="flex items-center gap-1">
+                    <div
+                      className="flex items-center gap-1"
+                      role="group"
+                      aria-label={`Cỡ chữ slide ${i + 1}`}
+                    >
+                      {(
+                        [
+                          ['Nhỏ', 0.8],
+                          ['Vừa', 1],
+                          ['To', 1.25],
+                        ] as const
+                      ).map(([label, scale]) => (
+                        <button
+                          key={label}
+                          type="button"
+                          onClick={() => setDraftFontScale(i, scale)}
+                          aria-pressed={(draftScales[i] ?? 1) === scale}
+                          className={
+                            'min-h-[36px] rounded-lg border px-2.5 text-xs font-bold ' +
+                            ((draftScales[i] ?? 1) === scale
+                              ? 'border-violet-500 bg-violet-500/20 text-violet-200'
+                              : 'border-white/10 text-slate-400')
+                          }
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setEditingIdx(editingIdx === i ? null : i)}
+                      aria-pressed={editingIdx === i}
+                      aria-label={`Sửa chữ slide ${i + 1}`}
+                      className={
+                        'min-h-[36px] rounded-lg border px-2.5 text-xs font-bold ' +
+                        (editingIdx === i
+                          ? 'border-violet-500 bg-violet-500/20 text-violet-200'
+                          : 'border-white/10 text-slate-400')
+                      }
+                    >
+                      {editingIdx === i ? '✓ Xong' : '✏️ Sửa'}
+                    </button>
                   </div>
                 </div>
-                <SlideRenderer slide={toPreviewSlide(d)} width={300} aspect={program.aspect_ratio} />
-                {editSlides && (
+                {editingIdx === i ? (
                   <textarea
                     value={
                       (() => {
@@ -713,8 +723,11 @@ export function SimpleSectionEditor() {
                     }
                     onChange={(e) => editDraftText(i, e.target.value)}
                     rows={4}
-                    className="mt-1 min-h-[80px] w-full rounded-lg border border-white/10 bg-[#0e0f11] px-2 py-1 font-mono text-xs text-slate-200"
+                    aria-label={`Nội dung slide ${i + 1}`}
+                    className="min-h-[120px] w-full rounded-lg border border-white/10 bg-[#0e0f11] px-2 py-1 text-base text-slate-100"
                   />
+                ) : (
+                  <SlideRenderer slide={toPreviewSlide(d)} width={300} aspect={program.aspect_ratio} />
                 )}
               </div>
             ))}

@@ -169,7 +169,7 @@ export function splitLyrics(
   text: string,
   opts: SplitLyricsOptions = {},
 ): { title?: string; slides: SlideDraft[] } {
-  const linesPerSlide = Math.max(1, Math.floor(opts.linesPerSlide ?? 4));
+  const linesPerSlide = Math.max(1, Math.floor(opts.linesPerSlide ?? 3));
   const background = opts.background ?? defaultSplitBackground();
   const showLabels = opts.showSectionLabels !== false;
   const highlight = opts.highlightChorus !== false;
@@ -299,7 +299,8 @@ export interface FontSizePreset {
 }
 
 export const FONT_SIZE_PRESETS: FontSizePreset[] = [
-  { id: 'vua', label: 'Vừa', linesPerSlide: 4, fontScale: 1 },
+  // Slide bài hát tối đa 3 dòng — đủ to, đủ rõ cho người già và trẻ em.
+  { id: 'vua', label: 'Vừa', linesPerSlide: 3, fontScale: 1 },
   { id: 'to', label: 'To', linesPerSlide: 3, fontScale: 1.25 },
   { id: 'cuc-to', label: 'Cực to', linesPerSlide: 2, fontScale: 1.5 },
 ];
