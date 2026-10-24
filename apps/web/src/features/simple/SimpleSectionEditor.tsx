@@ -201,8 +201,10 @@ export function SimpleSectionEditor() {
     let res: { title?: string; slides: SlideDraft[] };
     if (editorType === 'lyrics') {
       const r = splitLyrics(content, {
-        // Slide bài hát tối đa 3 dòng — preset nào cũng không vượt quá.
+        // Slide bài hát tối đa 3 dòng HIỂN THỊ — preset nào cũng không vượt quá.
         linesPerSlide: Math.min(fontPreset.linesPerSlide, 3),
+        // Truyền hệ số cỡ chữ để bộ chia ước tính đúng quấn dòng.
+        fontScale: fontPreset.fontScale,
         title: songTitle.trim() || section?.title,
         background,
       });

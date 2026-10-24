@@ -50,6 +50,36 @@ describe('splitLyrics', () => {
     expect(together).toBe(true);
   });
 
+  it('khóa 3 dòng HIỂN THỊ: dòng lời dài bị quấn thành 2 dòng hiển thị thì phải tách slide', () => {
+    // Trường hợp thật của người dùng: 3 dòng lời nhưng dòng thứ 3 dài 41 ký tự,
+    // ở cỡ chữ 40px nó quấn thành 2 dòng hiển thị → slide cũ hiện 4 dòng.
+    const input =
+      'Nguyện Thần Ngài tuôn đổ\n' +
+      'Làm mọi lòng tươi mới\n' +
+      'Lời nguyện cầu tha thiết với Cha tình yêu';
+    const { slides } = splitLyrics(input, { autoTitle: false });
+    expect(slides.length).toBe(2);
+    const texts = slides.map((s) =>
+      s.objects.filter((o) => o.type === 'text').map((o) => o.text).join('\n'),
+    );
+    expect(texts[0]).toContain('Nguyện Thần Ngài tuôn đổ');
+    expect(texts[0]).toContain('Làm mọi lòng tươi mới');
+    // Dòng dài giữ nguyên vẹn trên slide riêng (không cắt trơ 1 từ sang slide sau).
+    expect(texts[1]).toContain('Lời nguyện cầu tha thiết với Cha tình yêu');
+  });
+
+  it('dòng lời đơn lẻ quá dài tự cắt theo từ, không slide nào quá 3 dòng hiển thị', () => {
+    const longLine = 'Lời ca ngợi khen '.repeat(8).trim(); // ~135 ký tự → 4 dòng hiển thị ở 40px
+    const { slides } = splitLyrics(longLine, { autoTitle: false });
+    expect(slides.length).toBe(2);
+    const joined = slides
+      .map((s) =>
+        s.objects.filter((o) => o.type === 'text').map((o) => o.text).join(' '),
+      )
+      .join(' ');
+    for (const w of ['Lời', 'ca', 'ngợi', 'khen']) expect(joined).toContain(w);
+  });
+
   it('nhận diện điệp khúc: dòng "ĐK:" làm nhãn, không nằm trong lời', () => {
     const input =
       'ĐK:\n' +

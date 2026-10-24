@@ -24,8 +24,10 @@ export interface SlideDraft {
 }
 
 export interface SplitLyricsOptions {
-  /** Số dòng lời mỗi slide. Mặc định 4. */
+  /** Số dòng HIỂN THỊ tối đa mỗi slide (đã tính quấn dòng). Mặc định 3. */
   linesPerSlide?: number;
+  /** Hệ số cỡ chữ so với gốc 40px (preset Vừa=1, To=1.25, Cực to=1.5) — dùng để ước tính quấn dòng. */
+  fontScale?: number;
   /** Tiêu đề bài hát (hiển thị nhỏ trên mỗi slide). */
   title?: string;
   /** Tự lấy dòng đơn đầu tiên làm tiêu đề (mặc định true). */
@@ -139,27 +141,93 @@ function parseSegments(text: string): LyricSegment[] {
 }
 
 /**
- * Chia mảng dòng thành các cụm <= per dòng.
- * Tránh cắt ngang câu khi tránh được: nếu dòng cuối cụm không kết thúc
- * bằng dấu câu và dòng tiếp theo bắt đầu bằng chữ thường (cùng câu),
- * thì đẩy dòng đó sang cụm tiếp theo — nhưng mỗi cụm giữ lại ít nhất
- * ceil(per/2) dòng (giới hạn hợp lý, tránh cụm rỗng/dồn).
+ * Chia mảng dòng lời thành các cụm, mỗi cụm HIỂN THỊ tối đa `maxVisual` dòng
+ * (đã tính quấn dòng ở cỡ chữ cho trước — giống hệt cách renderer hiển thị).
+ * Nhờ đó một slide không bao giờ hiện quá số dòng cho phép, kể cả khi dòng
+ * lời dài bị quấn thành 2 dòng hiển thị.
+ * Ưu tiên giữ nguyên dòng lời: chỉ dòng đơn lẻ vượt quá giới hạn mới bị cắt
+ * theo từ thành nhiều cụm. Tránh cắt ngang câu khi tránh được: nếu dòng lời
+ * cuối cụm chưa kết thúc câu và dòng lời tiếp theo bắt đầu bằng chữ thường
+ * (cùng câu), thì đẩy cả dòng lời đó sang cụm sau — nhưng mỗi cụm giữ lại
+ * ít nhất ceil(maxVisual/2) dòng hiển thị.
  */
-function chunkLines(lines: string[], per: number): string[][] {
+function chunkVisualLines(lines: string[], maxVisual: number, fontSize: number): string[][] {
+  // Hộp thân bài ở slide chuẩn 960px: x=6%, w=88% → rộng 844.8px.
+  const boxWidth = 960 * 0.88;
+  // Rộng trung bình 1 ký tự ≈ 0.55 × cỡ chữ (hơi dư để khóa chặt, tránh tràn).
+  const charsPerLine = Math.max(1, Math.floor(boxWidth / (fontSize * 0.55)));
+
+  // Cắt 1 dòng lời thành các dòng hiển thị (theo từ, từ quá dài tự cắt).
+  const wrapLine = (line: string): string[] => {
+    const words = line.trim().split(/\s+/).filter(Boolean);
+    if (words.length === 0) return [''];
+    const out: string[] = [];
+    let cur = '';
+    for (const w of words) {
+      if (w.length > charsPerLine) {
+        if (cur) {
+          out.push(cur);
+          cur = '';
+        }
+        for (let k = 0; k < w.length; k += charsPerLine) out.push(w.slice(k, k + charsPerLine));
+        continue;
+      }
+      const add = cur ? `${cur} ${w}` : w;
+      if (add.length > charsPerLine) {
+        out.push(cur);
+        cur = w;
+      } else {
+        cur = add;
+      }
+    }
+    if (cur || out.length === 0) out.push(cur);
+    return out;
+  };
+
+  // Đơn vị chia: 1 dòng lời nguyên vẹn, hoặc 1 nhóm mảnh của dòng quá dài.
+  interface Unit {
+    text: string;
+    visual: number;
+    lyric: number;
+    whole: boolean;
+  }
+  const units: Unit[] = [];
+  lines.forEach((line, li) => {
+    const frags = wrapLine(line);
+    if (frags.length > maxVisual) {
+      for (let k = 0; k < frags.length; k += maxVisual) {
+        const group = frags.slice(k, k + maxVisual);
+        units.push({ text: group.join('\n'), visual: group.length, lyric: li, whole: false });
+      }
+    } else {
+      units.push({ text: line, visual: frags.length, lyric: li, whole: true });
+    }
+  });
+
   const chunks: string[][] = [];
-  const minKeep = Math.max(1, Math.ceil(per / 2));
+  const minKeep = Math.max(1, Math.ceil(maxVisual / 2));
   let i = 0;
-  while (i < lines.length) {
-    let end = Math.min(i + per, lines.length);
+  while (i < units.length) {
+    let visual = 0;
+    let end = i;
+    while (end < units.length && visual + units[end].visual <= maxVisual) {
+      visual += units[end].visual;
+      end += 1;
+    }
+    // Tránh cắt ngang câu — chỉ khi ranh giới nằm giữa 2 dòng lời nguyên vẹn.
     while (
-      end > i + minKeep &&
-      end < lines.length &&
-      !END_PUNCT_RE.test(lines[end - 1].trimEnd()) &&
-      LOWER_START_RE.test(lines[end].trimStart())
+      end > i + 1 &&
+      end < units.length &&
+      units[end - 1].whole &&
+      units[end].whole &&
+      visual - units[end - 1].visual >= minKeep &&
+      !END_PUNCT_RE.test(lines[units[end - 1].lyric].trimEnd()) &&
+      LOWER_START_RE.test(lines[units[end].lyric].trimStart())
     ) {
+      visual -= units[end - 1].visual;
       end -= 1;
     }
-    chunks.push(lines.slice(i, end));
+    chunks.push(units.slice(i, end).map((u) => u.text));
     i = end;
   }
   return chunks;
@@ -169,7 +237,9 @@ export function splitLyrics(
   text: string,
   opts: SplitLyricsOptions = {},
 ): { title?: string; slides: SlideDraft[] } {
-  const linesPerSlide = Math.max(1, Math.floor(opts.linesPerSlide ?? 3));
+  const maxVisualLines = Math.max(1, Math.floor(opts.linesPerSlide ?? 3));
+  // Cỡ chữ thân bài hiệu dụng (gốc 40px × hệ số preset) — để ước tính quấn dòng.
+  const effFontSize = 40 * (opts.fontScale ?? 1);
   const background = opts.background ?? defaultSplitBackground();
   const showLabels = opts.showSectionLabels !== false;
   const highlight = opts.highlightChorus !== false;
@@ -192,7 +262,7 @@ export function splitLyrics(
   let verseNo = 0;
   const buildSlides = (seg: LyricSegment): SlideDraft[] => {
     const segNo = seg.chorus ? 0 : ++verseNo;
-    const chunks = chunkLines(seg.lines, linesPerSlide);
+    const chunks = chunkVisualLines(seg.lines, maxVisualLines, effFontSize);
     return chunks.map((chunk, ci) => {
       const objects: SplitSlideObject[] = [];
       if (title) objects.push(makeTitleObject(title));
