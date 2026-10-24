@@ -2,7 +2,7 @@
 // Nguyên tắc kiểm tra: giữ nguyên 100% nội dung (từng ký tự, trừ dòng nhãn ĐK),
 // không cắt ngang câu khi tránh được, nhận diện điệp khúc, đánh số câu Kinh Thánh.
 import { describe, expect, it } from 'vitest';
-import { splitBible, splitLyrics } from './split';
+import { FONT_SIZE_PRESETS, scaleDraftFonts, splitBible, splitLyrics } from './split';
 
 /** Gom toàn bộ text trong các object text của các slide thành 1 chuỗi. */
 function allBodyText(slides: { objects: { type: string; text?: string }[] }[]): string {
@@ -150,5 +150,38 @@ describe('splitBible', () => {
 
   it('input rỗng → không có slide', () => {
     expect(splitBible('  \n ').slides).toHaveLength(0);
+  });
+});
+
+describe('scaleDraftFonts', () => {
+  const LYRICS = 'Dòng một lời ca\nDòng hai lời ca\nDòng ba lời ca\nDòng bốn lời ca\nDòng năm lời ca';
+
+  it('scale=1 → giữ nguyên fontSize', () => {
+    const { slides } = splitLyrics(LYRICS, { linesPerSlide: 5 });
+    const before = slides[0].objects.map((o) => o.fontSize);
+    const after = scaleDraftFonts(slides, 1)[0].objects.map((o) => o.fontSize);
+    expect(after).toEqual(before);
+  });
+
+  it('scale=1.5 → phóng to cỡ chữ, giữ nguyên nội dung', () => {
+    const { slides } = splitLyrics(LYRICS, { linesPerSlide: 5 });
+    const scaled = scaleDraftFonts(slides, 1.5);
+    expect(scaled).toHaveLength(slides.length);
+    slides[0].objects.forEach((o, i) => {
+      const so = scaled[0].objects[i];
+      if (o.type === 'text' && o.fontSize) {
+        expect(so.fontSize).toBe(Math.round(o.fontSize * 1.5));
+      }
+      expect(so.text).toBe(o.text); // nội dung không đổi
+    });
+  });
+
+  it('FONT_SIZE_PRESETS có 3 mức, dòng/slide giảm dần khi chữ to dần', () => {
+    expect(FONT_SIZE_PRESETS.map((p) => p.id)).toEqual(['vua', 'to', 'cuc-to']);
+    const lines = FONT_SIZE_PRESETS.map((p) => p.linesPerSlide);
+    expect(lines).toEqual([4, 3, 2]);
+    const scales = FONT_SIZE_PRESETS.map((p) => p.fontScale);
+    expect(scales[0]).toBeLessThan(scales[1]);
+    expect(scales[1]).toBeLessThan(scales[2]);
   });
 });

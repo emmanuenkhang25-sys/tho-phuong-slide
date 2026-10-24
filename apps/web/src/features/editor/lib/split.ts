@@ -287,3 +287,30 @@ export function splitBible(
   }
   return { title: opts.reference, slides };
 }
+
+/** Preset cỡ chữ khi tách bài hát / Kinh Thánh (cho người lớn tuổi đọc rõ). */
+export interface FontSizePreset {
+  id: 'vua' | 'to' | 'cuc-to';
+  label: string;
+  /** Số dòng mỗi slide tương ứng. */
+  linesPerSlide: number;
+  /** Hệ số phóng to fontSize của object chữ. */
+  fontScale: number;
+}
+
+export const FONT_SIZE_PRESETS: FontSizePreset[] = [
+  { id: 'vua', label: 'Vừa', linesPerSlide: 4, fontScale: 1 },
+  { id: 'to', label: 'To', linesPerSlide: 3, fontScale: 1.25 },
+  { id: 'cuc-to', label: 'Cực to', linesPerSlide: 2, fontScale: 1.5 },
+];
+
+/** Phóng to cỡ chữ mọi object text trong các draft (giữ nguyên nội dung). */
+export function scaleDraftFonts(drafts: SlideDraft[], scale: number): SlideDraft[] {
+  if (scale === 1) return drafts;
+  return drafts.map((d) => ({
+    ...d,
+    objects: d.objects.map((o) =>
+      o.type === 'text' && o.fontSize ? { ...o, fontSize: Math.round(o.fontSize * scale) } : o,
+    ),
+  }));
+}

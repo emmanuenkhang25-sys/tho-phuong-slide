@@ -71,6 +71,7 @@ export function EditorPage() {
   const [denied, setDenied] = useState(false);
   const [conflict, setConflict] = useState(false);
   const [showSplit, setShowSplit] = useState(false);
+  const [splitSectionId, setSplitSectionId] = useState<string | null>(null);
   const [showInfo, setShowInfo] = useState(false);
   const [showAddSection, setShowAddSection] = useState(false);
   const [newSectionTitle, setNewSectionTitle] = useState('');
@@ -1088,6 +1089,7 @@ export function EditorPage() {
             onDeleteSection={deleteSection}
             onMoveSectionUp={(sid) => moveSection(sid, -1)}
             onMoveSectionDown={(sid) => moveSection(sid, 1)}
+            onOpenSplitForSection={(sid) => { setSplitSectionId(sid); setShowSplit(true); }}
           />
         </aside>
 
@@ -1154,6 +1156,7 @@ export function EditorPage() {
             onDeleteSection={deleteSection}
             onMoveSectionUp={(sid) => moveSection(sid, -1)}
             onMoveSectionDown={(sid) => moveSection(sid, 1)}
+            onOpenSplitForSection={(sid) => { setSplitSectionId(sid); setShowSplit(true); }}
           />
         </div>
       </details>
@@ -1267,8 +1270,10 @@ export function EditorPage() {
       {/* Modal tự động chia bài hát / Kinh Thánh */}
       <AutoSplitModal
         open={showSplit}
-        onClose={() => setShowSplit(false)}
+        onClose={() => { setShowSplit(false); setSplitSectionId(null); }}
         sections={sections}
+        initialSectionId={splitSectionId}
+        churchId={program.church_id}
         defaultBackground={
           (program.design_template?.defaultBackground as SlideBackground | undefined) ?? { type: 'color', color: '#1e3a5f' }
         }

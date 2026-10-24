@@ -27,17 +27,29 @@ export interface ThumbnailsPanelProps {
   onDeleteSection: (id: string) => void;
   onMoveSectionUp: (id: string) => void;
   onMoveSectionDown: (id: string) => void;
+  /** Mở modal "Thêm bài hát" và chọn sẵn mục này (nút nổi bật cho mục hát). */
+  onOpenSplitForSection?: (sectionId: string) => void;
 }
 
+/** Các mục hát — hiện nút "Thêm bài hát" nổi bật. */
+const SONG_SECTION_KINDS = new Set(['hat-tho-phuong', 'thanh-ca']);
+
 const smallBtn =
-  'inline-flex items-center justify-center rounded border border-slate-300 bg-white text-xs text-slate-600 hover:bg-slate-100 min-w-[28px] min-h-[28px] px-1 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700';
+  'inline-flex items-center justify-center rounded border border-slate-300 bg-white text-sm text-slate-600 hover:bg-slate-100 min-w-[40px] min-h-[40px] px-1.5 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700';
 
 export function ThumbnailsPanel(p: ThumbnailsPanelProps) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [dragId, setDragId] = useState<string | null>(null);
+  // Accordion: mục nào đang thu gọn. Mặc định chỉ mở mục đầu tiên.
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   const orderedSections = [...p.sections].sort((a, b) => a.order_index - b.order_index);
+  const sectionKey = (sectionId: string | null) => sectionId ?? '__none__';
+  const isCollapsed = (sectionId: string | null, index: number) =>
+    collapsed[sectionKey(sectionId)] ?? index !== 0;
+  const toggleCollapsed = (sectionId: string | null, index: number) =>
+    setCollapsed((c) => ({ ...c, [sectionKey(sectionId)]: !isCollapsed(sectionId, index) }));
   const slidesOf = (sectionId: string | null) =>
     p.slides.filter((s) => s.section_id === sectionId);
 
@@ -80,24 +92,26 @@ export function ThumbnailsPanel(p: ThumbnailsPanelProps) {
         <SlideRenderer slide={slide} width={132} aspect={p.aspect} />
         <div className="mt-0.5 flex items-center justify-between">
           <span className="text-[11px] text-slate-500 dark:text-slate-400">#{slide.order_index + 1}</span>
-          <span className="hidden gap-0.5 group-hover:flex">
+          <span className="flex gap-0.5">
             <button className={smallBtn} title="Nhân bản slide" onClick={(e) => { e.stopPropagation(); p.onDuplicateSlide(slide.id); }}>⧉</button>
             <button className={smallBtn} title="Xóa slide" onClick={(e) => { e.stopPropagation(); p.onDeleteSlide(slide.id); }}>✕</button>
           </span>
         </div>
-        {/* Nút lên/xuống cho mobile (fallback khi không kéo-thả được) */}
-        <div className="mt-0.5 flex gap-1 sm:hidden">
-          <button className={smallBtn + ' flex-1'} title="Chuyển slide lên trên" onClick={(e) => { e.stopPropagation(); p.onMoveSlideUp(slide.id); }}>▲</button>
-          <button className={smallBtn + ' flex-1'} title="Chuyển slide xuống dưới" onClick={(e) => { e.stopPropagation(); p.onMoveSlideDown(slide.id); }}>▼</button>
+        {/* Nút lên/xuống luôn hiển thị (mobile không kéo-thả được) */}
+        <div className="mt-1 flex gap-1">
+          <button className={smallBtn + ' flex-1'} title="Chuyển slide lên trên" onClick={(e) => { e.stopPropagation(); p.onMoveSlideUp(slide.id); }}>▲ Lên</button>
+          <button className={smallBtn + ' flex-1'} title="Chuyển slide xuống dưới" onClick={(e) => { e.stopPropagation(); p.onMoveSlideDown(slide.id); }}>▼ Xuống</button>
         </div>
       </div>
     );
   };
 
-  const renderSection = (sec: Section | null) => {
+  const renderSection = (sec: Section | null, index: number) => {
     const sectionId = sec?.id ?? null;
     const list = slidesOf(sectionId);
     const title = sec ? sec.title : 'Chưa phân mục';
+    const collapsedNow = isCollapsed(sectionId, index);
+    const isSongSection = !!sec && SONG_SECTION_KINDS.has(sec.kind);
     return (
       <div
         key={sectionId ?? '__none__'}
@@ -128,6 +142,15 @@ export function ThumbnailsPanel(p: ThumbnailsPanelProps) {
           }}
           onDragEnd={() => setDragId(null)}
         >
+          {/* Nút xổ ra / thu gọn (accordion) */}
+          <button
+            className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded text-lg text-slate-500 hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-slate-700"
+            title={collapsedNow ? 'Mở rộng mục' : 'Thu gọn mục'}
+            aria-label={collapsedNow ? `Mở rộng mục ${title}` : `Thu gọn mục ${title}`}
+            onClick={() => toggleCollapsed(sectionId, index)}
+          >
+            {collapsedNow ? '▸' : '▾'}
+          </button>
           {renamingId === sectionId ? (
             <input
               autoFocus
@@ -141,9 +164,16 @@ export function ThumbnailsPanel(p: ThumbnailsPanelProps) {
               }}
             />
           ) : (
-            <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-700 dark:text-slate-200" title={sec ? `${title} (${sectionKindLabel(sec.kind)})` : title}>
+            <span
+              className="min-w-0 flex-1 cursor-pointer truncate text-sm font-semibold text-slate-700 dark:text-slate-200"
+              title={sec ? `${title} (${sectionKindLabel(sec.kind)}) — bấm để ${collapsedNow ? 'mở rộng' : 'thu gọn'}` : title}
+              onClick={() => toggleCollapsed(sectionId, index)}
+            >
               {title}
               {sec && <span className="ml-1 text-[11px] font-normal text-slate-400">· {sectionKindLabel(sec.kind)}</span>}
+              <span className="ml-1 rounded-full bg-slate-200 px-1.5 text-[11px] font-normal text-slate-500 dark:bg-slate-700 dark:text-slate-300">
+                {list.length}
+              </span>
             </span>
           )}
           {sec && (
@@ -155,15 +185,28 @@ export function ThumbnailsPanel(p: ThumbnailsPanelProps) {
             </span>
           )}
         </div>
-        <div className="flex flex-col gap-1.5">
-          {list.map((s, i) => renderThumb(s, i, sectionId))}
-        </div>
-        <button
-          className="mt-1.5 w-full rounded-md border border-dashed border-slate-300 py-1.5 text-xs text-slate-500 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-700 min-h-[36px]"
-          onClick={() => p.onAddSlide(sectionId)}
-        >
-          ＋ Thêm slide vào mục này
-        </button>
+        {!collapsedNow && (
+          <>
+            {/* Nút thêm bài hát nổi bật cho mục hát */}
+            {isSongSection && p.onOpenSplitForSection && (
+              <button
+                className="mb-1.5 flex min-h-[48px] w-full items-center justify-center gap-2 rounded-lg bg-violet-600 px-3 text-sm font-bold text-white hover:bg-violet-700"
+                onClick={() => p.onOpenSplitForSection!(sec!.id)}
+              >
+                🎵 Thêm bài hát
+              </button>
+            )}
+            <div className="flex flex-col gap-1.5">
+              {list.map((s, i) => renderThumb(s, i, sectionId))}
+            </div>
+            <button
+              className="mt-1.5 w-full rounded-md border border-dashed border-slate-300 py-1.5 text-sm text-slate-500 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-700 min-h-[44px]"
+              onClick={() => p.onAddSlide(sectionId)}
+            >
+              ＋ Thêm slide vào mục này
+            </button>
+          </>
+        )}
       </div>
     );
   };
@@ -171,8 +214,8 @@ export function ThumbnailsPanel(p: ThumbnailsPanelProps) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto p-2">
-        {orderedSections.map((s) => renderSection(s))}
-        {renderSection(null)}
+        {orderedSections.map((s, i) => renderSection(s, i))}
+        {renderSection(null, orderedSections.length)}
         {/* Vùng thả để chuyển mục xuống cuối */}
         <div
           className="rounded-md border border-dashed border-transparent p-2 text-center text-[11px] text-slate-400"

@@ -32,10 +32,20 @@ export interface AssetCacheEntry {
   dataUrl: string; // dataURL (base64)
 }
 
+/** Bài hát đã lưu trong "Thư viện bài hát" của một hội thánh (cục bộ trên máy). */
+export interface SongLibraryEntry {
+  id: string; // uuid
+  churchId: string;
+  title: string;
+  lyrics: string;
+  updatedAt: string; // ISO
+}
+
 class TpsDatabase extends Dexie {
   drafts!: Table<ProgramDraft, string>;
   sync_queue!: Table<SyncOp, number>;
   assets_cache!: Table<AssetCacheEntry, string>;
+  song_library!: Table<SongLibraryEntry, string>;
 
   constructor() {
     super('thophuongslide');
@@ -43,6 +53,13 @@ class TpsDatabase extends Dexie {
       drafts: 'programId',
       sync_queue: '++id',
       assets_cache: 'path',
+    });
+    // v2: thêm thư viện bài hát theo hội thánh
+    this.version(2).stores({
+      drafts: 'programId',
+      sync_queue: '++id',
+      assets_cache: 'path',
+      song_library: 'id, churchId',
     });
   }
 }
@@ -88,4 +105,21 @@ export async function peekSyncQueue(): Promise<SyncOp[]> {
 /** Đếm số thao tác đang chờ đồng bộ. */
 export async function countPendingSync(): Promise<number> {
   return db.sync_queue.count();
+}
+
+/* ------------------------- Thư viện bài hát ------------------------- */
+
+/** Lưu (thêm mới hoặc ghi đè theo id) một bài hát vào thư viện của hội thánh. */
+export async function saveSongToLibrary(entry: SongLibraryEntry): Promise<void> {
+  await db.song_library.put(entry);
+}
+
+/** Lấy toàn bộ bài hát đã lưu của một hội thánh (mới nhất trước). */
+export async function getSongsByChurch(churchId: string): Promise<SongLibraryEntry[]> {
+  return db.song_library.where('churchId').equals(churchId).reverse().sortBy('updatedAt');
+}
+
+/** Xóa một bài hát khỏi thư viện. */
+export async function deleteSongFromLibrary(id: string): Promise<void> {
+  await db.song_library.delete(id);
 }

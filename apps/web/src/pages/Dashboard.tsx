@@ -12,9 +12,12 @@ import {
   ConfirmDialog,
   EmptyState,
   Input,
+  Modal,
   Spinner,
   useToast,
 } from '../components/ui';
+import { PROGRAM_TEMPLATES, buildProgramFromTemplate } from '../features/templates/programTemplates';
+import { uuid } from '../features/editor/lib/editorUtils';
 
 interface ProgramWithEditor extends Program {
   editor_name?: string;
@@ -40,6 +43,7 @@ export function Dashboard() {
   const [tab, setTab] = useState<'recent' | 'upcoming'>('recent');
   const [deleting, setDeleting] = useState<Program | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showTemplateChoice, setShowTemplateChoice] = useState(false);
 
   useEffect(() => {
     void ensureChurchLoaded();
@@ -113,26 +117,67 @@ export function Dashboard() {
       .sort((a, b) => (a.event_date ?? '').localeCompare(b.event_date ?? ''))[0];
   }, [programs]);
 
-  const createProgram = async () => {
+  const createProgram = async (templateId: string | null) => {
     if (!currentChurch || !user) return;
-    setBusy(true);
-    const { data, error } = await supabase
-      .from('programs')
-      .insert({
-        church_id: currentChurch.id,
-        title: 'Chương trình mới',
-        created_by: user.id,
-        updated_by: user.id,
-      })
-      .select('id')
-      .single();
-    setBusy(false);
-    if (error || !data) {
-      toast(`Tạo chương trình lỗi: ${error?.message ?? 'không rõ'}`, 'error');
+    // Xác thực phiên đăng nhập với server trước khi ghi (tránh token hết hạn)
+    const { data: userData, error: userErr } = await supabase.auth.getUser();
+    if (userErr || !userData.user) {
+      setShowTemplateChoice(false);
+      toast('Phiên đăng nhập đã hết hạn. Vui lòng đăng xuất rồi đăng nhập lại.', 'error');
       return;
     }
+    setBusy(true);
+    // Tạo id ở máy khách, INSERT không kèm .select() (không dùng RETURNING)
+    const programId = uuid();
+    const { error } = await supabase.from('programs').insert({
+      id: programId,
+      church_id: currentChurch.id,
+      title: templateId ? 'Chương trình thờ phượng Chúa nhật' : 'Chương trình mới',
+      created_by: userData.user.id,
+      updated_by: userData.user.id,
+    });
+    if (error) {
+      setBusy(false);
+      toast(`Tạo chương trình lỗi: ${error.message}`, 'error');
+      return;
+    }
+    // Dựng sẵn mục + slide từ mẫu chương trình (nếu chọn)
+    if (templateId) {
+      const template = PROGRAM_TEMPLATES.find((t) => t.id === templateId);
+      if (template) {
+        const { sections, slides } = buildProgramFromTemplate(programId, template);
+        const { error: secErr } = await supabase.from('sections').insert(
+          sections.map((s) => ({
+            id: s.id,
+            program_id: s.program_id,
+            title: s.title,
+            kind: s.kind,
+            order_index: s.order_index,
+          })),
+        );
+        if (!secErr && slides.length > 0) {
+          const { error: sliErr } = await supabase.from('slides').insert(
+            slides.map((s) => ({
+              id: s.id,
+              program_id: s.program_id,
+              section_id: s.section_id,
+              order_index: s.order_index,
+              content: s.content,
+              background: s.background,
+            })),
+          );
+          if (sliErr) {
+            toast(`Tạo mục mẫu xong, nhưng tạo slide mẫu lỗi: ${sliErr.message}`, 'error');
+          }
+        } else if (secErr) {
+          toast(`Tạo chương trình xong, nhưng tạo mục mẫu lỗi: ${secErr.message}`, 'error');
+        }
+      }
+    }
+    setBusy(false);
+    setShowTemplateChoice(false);
     toast('Đã tạo chương trình mới.', 'success');
-    navigate(`/chuong-trinh/${(data as { id: string }).id}`);
+    navigate(`/chuong-trinh/${programId}`);
   };
 
   const toggleFavorite = async (p: Program) => {
@@ -181,7 +226,7 @@ export function Dashboard() {
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
           {canEditProgram(myRole) && currentChurch && (
-            <Button onClick={createProgram} loading={busy} className="!bg-gold-400 !text-church-950 hover:!bg-gold-500">
+            <Button onClick={() => setShowTemplateChoice(true)} loading={busy} className="!bg-gold-400 !text-church-950 hover:!bg-gold-500">
               ➕ Tạo chương trình mới
             </Button>
           )}
@@ -191,7 +236,7 @@ export function Dashboard() {
             </Link>
           )}
           <Link to="/mau-slide">
-            <Button variant="secondary">🎵 Thư viện bài hát</Button>
+            <Button variant="secondary">🎨 Mẫu slide</Button>
           </Link>
           <Link to="/hoi-thanh">
             <Button variant="secondary">⛪ Quản lý hội thánh</Button>
@@ -258,7 +303,7 @@ export function Dashboard() {
               title={search ? 'Không tìm thấy chương trình' : 'Chưa có chương trình nào'}
               message={search ? 'Thử từ khóa khác.' : 'Tạo chương trình thờ phượng đầu tiên cho hội thánh của bạn.'}
               action={
-                canEditProgram(myRole) && !search ? <Button onClick={createProgram}>➕ Tạo chương trình mới</Button> : undefined
+                canEditProgram(myRole) && !search ? <Button onClick={() => setShowTemplateChoice(true)}>➕ Tạo chương trình mới</Button> : undefined
               }
             />
           ) : (
@@ -339,6 +384,50 @@ export function Dashboard() {
         danger
         loading={busy}
       />
+
+      {/* Dialog chọn mẫu khi tạo chương trình mới */}
+      <Modal open={showTemplateChoice} onClose={() => setShowTemplateChoice(false)} title="➕ Tạo chương trình mới">
+        <div className="flex flex-col gap-3">
+          <p className="-mt-1 text-sm text-slate-500 dark:text-slate-400">
+            Chọn mẫu có sẵn để bắt đầu nhanh, hoặc tạo chương trình trống.
+          </p>
+          {PROGRAM_TEMPLATES.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => void createProgram(t.id)}
+              disabled={busy}
+              className="flex min-h-touch items-center gap-3 rounded-xl border-2 border-church-500 bg-church-50 p-4 text-left hover:bg-church-100 disabled:opacity-50 dark:border-church-600 dark:bg-church-900/30 dark:hover:bg-church-900/50"
+            >
+              <span className="text-3xl" aria-hidden>📄</span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-base font-bold text-slate-900 dark:text-slate-100">
+                  {t.name}
+                </span>
+                <span className="block text-sm text-slate-500 dark:text-slate-400">
+                  {t.description} ({t.sections.length} mục)
+                </span>
+              </span>
+              <span className="text-xl text-church-600 dark:text-church-300" aria-hidden>→</span>
+            </button>
+          ))}
+          <button
+            onClick={() => void createProgram(null)}
+            disabled={busy}
+            className="flex min-h-touch items-center gap-3 rounded-xl border border-slate-300 p-4 text-left hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:hover:bg-slate-800"
+          >
+            <span className="text-3xl" aria-hidden>📝</span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-base font-bold text-slate-900 dark:text-slate-100">
+                Chương trình trống
+              </span>
+              <span className="block text-sm text-slate-500 dark:text-slate-400">
+                Tự thêm từng mục và slide theo ý bạn
+              </span>
+            </span>
+            <span className="text-xl text-slate-400" aria-hidden>→</span>
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }
