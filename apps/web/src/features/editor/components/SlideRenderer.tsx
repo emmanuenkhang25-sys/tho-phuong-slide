@@ -16,7 +16,7 @@
 // trực tiếp bằng tay (chạm vào chữ rồi di chuyển) — chỉ màn sửa mục dùng;
 // các nơi khác không truyền prop này nên chữ không kéo được.
 // ============================================================
-import { useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import type { AspectRatio, Slide, SlideBackground, SlideObject } from '../../../lib/types';
 
 /** Kéo chữ trực tiếp trong slide nháp: ghi vị trí + kích thước mới (%, đã ôm sát chữ). */
@@ -40,6 +40,34 @@ const BASE_W = 960; // fontSize trong SlideObject tính theo slide rộng 960px
 /** Làm tròn 1 chữ số thập phân (tọa độ %). */
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
+/** Ngưỡng hút vào giữa slide khi kéo chữ (đơn vị %). */
+const SNAP_PCT = 2;
+
+/**
+ * Đo độ rộng tự nhiên (không ngắt dòng) của dòng dài nhất trong text, bằng
+ * canvas — dùng để khôi phục khung chữ đã bị thu hẹp bất thường (VD slide
+ * "Nhạc dạo" bị ngắt thành "Nhạ / c / dạo"): khung kéo sẽ rộng lại bằng dòng
+ * dài nhất để chữ không bao giờ phải ngắt giữa từ.
+ */
+let measureCtx: CanvasRenderingContext2D | null | undefined;
+function naturalLineWidthPx(text: string, font: string): number {
+  if (measureCtx === undefined) {
+    try {
+      measureCtx = document.createElement('canvas').getContext('2d');
+    } catch {
+      measureCtx = null;
+    }
+  }
+  if (!measureCtx) return 0;
+  measureCtx.font = font;
+  let max = 0;
+  for (const seg of text.split('\n')) {
+    if (!seg) continue;
+    max = Math.max(max, measureCtx.measureText(seg).width);
+  }
+  return max;
+}
+
 function backgroundStyle(bg: SlideBackground | undefined | null): CSSProperties {
   if (!bg) return { backgroundColor: '#000000' };
   if (bg.type === 'gradient' && bg.gradient) {
@@ -62,11 +90,14 @@ function ObjectView({
   scale,
   highlightChorus,
   textDrag,
+  onDragGuide,
 }: {
   obj: SlideObject;
   scale: number;
   highlightChorus: boolean;
   textDrag?: TextDragHandlers;
+  /** Báo tâm khung chữ đang kéo (null = không kéo) để vẽ đường gióng giữa slide. */
+  onDragGuide?: (g: { cx: number; cy: number } | null) => void;
 }) {
   // Trạng thái kéo của riêng object này (mỗi object một instance).
   const dragRef = useRef<{ grabX: number; grabY: number; w: number; h: number } | null>(null);
@@ -130,13 +161,30 @@ function ObjectView({
       if (!m) return;
       const px = ((e.clientX - m.slideRect.left) / m.slideRect.width) * 100;
       const py = ((e.clientY - m.slideRect.top) / m.slideRect.height) * 100;
+      // Khôi phục độ rộng tự nhiên: khung đang hẹp hơn dòng dài nhất (do kéo
+      // trước đó hoặc đổi cỡ chữ) thì rộng lại bằng dòng dài nhất, neo theo
+      // căn lề — chữ không còn bị ngắt giữa từ nữa.
+      let nx = m.x;
+      let nw = m.w;
+      const font = `${obj.italic ? 'italic ' : ''}${obj.bold ? '700' : '400'} ${(obj.fontSize ?? 32) * scale}px ${obj.fontFamily ?? 'Arial, sans-serif'}`;
+      const natPx = naturalLineWidthPx(obj.text, font);
+      const natPct = natPx > 0 ? (natPx / m.slideRect.width) * 100 + 0.2 : 0;
+      if (natPct > m.w) {
+        nw = Math.min(100, natPct);
+        const align = obj.align ?? 'center';
+        if (align === 'left') nx = m.x;
+        else if (align === 'right') nx = m.x + m.w - nw;
+        else nx = m.x + m.w / 2 - nw / 2;
+        nx = Math.min(Math.max(0, nx), Math.max(0, 100 - nw));
+      }
       try {
         el.setPointerCapture(e.pointerId);
       } catch {
         /* không bắt được pointer thì vẫn kéo chừng nào ngón tay còn trên chữ */
       }
       // Giữ nguyên khoảng cách ngón tay — mép khung sát chữ để chữ không nhảy.
-      dragRef.current = { grabX: px - m.x, grabY: py - m.y, w: m.w, h: m.h };
+      dragRef.current = { grabX: px - nx, grabY: py - m.y, w: nw, h: m.h };
+      onDragGuide?.({ cx: nx + nw / 2, cy: m.y + m.h / 2 });
     };
     const onPointerMove = (e: ReactPointerEvent) => {
       const st = dragRef.current;
@@ -146,12 +194,25 @@ function ObjectView({
       const slideRect = slideEl.getBoundingClientRect();
       const px = ((e.clientX - slideRect.left) / slideRect.width) * 100;
       const py = ((e.clientY - slideRect.top) / slideRect.height) * 100;
-      const nx = Math.min(Math.max(0, px - st.grabX), Math.max(0, 100 - st.w));
-      const ny = Math.min(Math.max(0, py - st.grabY), Math.max(0, 100 - st.h));
+      let nx = Math.min(Math.max(0, px - st.grabX), Math.max(0, 100 - st.w));
+      let ny = Math.min(Math.max(0, py - st.grabY), Math.max(0, 100 - st.h));
+      // Hút vào chính giữa slide khi đã gần giữa — đường gióng sẽ đậm lên.
+      let cx = nx + st.w / 2;
+      let cy = ny + st.h / 2;
+      if (Math.abs(cx - 50) <= SNAP_PCT) {
+        nx = 50 - st.w / 2;
+        cx = 50;
+      }
+      if (Math.abs(cy - 50) <= SNAP_PCT) {
+        ny = 50 - st.h / 2;
+        cy = 50;
+      }
       textDrag.onTextMove(obj.id, { x: round1(nx), y: round1(ny), w: round1(st.w), h: round1(st.h) });
+      onDragGuide?.({ cx, cy });
     };
     const onPointerEnd = () => {
       dragRef.current = null;
+      onDragGuide?.(null);
     };
 
     return (
@@ -162,6 +223,10 @@ function ObjectView({
         onPointerCancel={draggable ? onPointerEnd : undefined}
         style={{
           ...box,
+          // Khung cao tự giãn theo chữ (giữ chiều cao cũ làm tối thiểu): chữ
+          // phóng to chỉ cao thêm xuống dưới, không bao giờ bị cắt mất.
+          height: 'auto',
+          minHeight: box.height,
           fontFamily: obj.fontFamily ?? 'Arial, sans-serif',
           fontSize: (obj.fontSize ?? 32) * scale,
           color: obj.color ?? '#ffffff',
@@ -170,7 +235,10 @@ function ObjectView({
           textAlign: obj.align ?? 'center',
           lineHeight: obj.lineHeight ?? 1.4,
           whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
+          // Chỉ ngắt dòng ở khoảng trắng — không ngắt giữa từ (VD "Nhạc dạo"
+          // không còn thành "Nhạ / c / dạo"); chỉ từ đơn quá dài mới ngắt.
+          wordBreak: 'normal',
+          overflowWrap: 'break-word',
           overflow: 'hidden',
           touchAction: draggable ? 'none' : undefined,
           cursor: draggable ? 'grab' : undefined,
@@ -258,6 +326,8 @@ export function SlideRenderer({
   const scale = width / BASE_W;
   const objects = [...(slide.content?.objects ?? [])].sort((a, b) => (a.z ?? 0) - (b.z ?? 0));
   const bg = slide.background;
+  // Tâm khung chữ đang kéo (null = không kéo) — để vẽ đường gióng giữa slide.
+  const [guide, setGuide] = useState<{ cx: number; cy: number } | null>(null);
 
   return (
     <div
@@ -271,7 +341,14 @@ export function SlideRenderer({
       }}
     >
       {objects.map((o) => (
-        <ObjectView key={o.id} obj={o} scale={scale} highlightChorus={highlightChorus} textDrag={textDrag} />
+        <ObjectView
+          key={o.id}
+          obj={o}
+          scale={scale}
+          highlightChorus={highlightChorus}
+          textDrag={textDrag}
+          onDragGuide={setGuide}
+        />
       ))}
       {bg?.overlayOpacity ? (
         <div
@@ -284,6 +361,38 @@ export function SlideRenderer({
           }}
         />
       ) : null}
+      {/* Đường gióng giữa slide khi đang kéo chữ: nét đứt = chưa giữa, nét
+          liền hồng = đã hút vào chính giữa (cân trên-dưới, trái-phải). */}
+      {guide && (
+        <>
+          <div
+            data-tps-guide="v"
+            style={{
+              position: 'absolute',
+              left: '50%',
+              top: 0,
+              bottom: 0,
+              borderLeft:
+                Math.abs(guide.cx - 50) < 0.6 ? '2px solid #f472b6' : '1px dashed rgba(255,255,255,0.55)',
+              pointerEvents: 'none',
+              zIndex: 999,
+            }}
+          />
+          <div
+            data-tps-guide="h"
+            style={{
+              position: 'absolute',
+              top: '50%',
+              left: 0,
+              right: 0,
+              borderTop:
+                Math.abs(guide.cy - 50) < 0.6 ? '2px solid #f472b6' : '1px dashed rgba(255,255,255,0.55)',
+              pointerEvents: 'none',
+              zIndex: 999,
+            }}
+          />
+        </>
+      )}
     </div>
   );
 }
