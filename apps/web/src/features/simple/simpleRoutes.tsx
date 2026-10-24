@@ -4,6 +4,7 @@ import { OpenLatest } from './OpenLatest';
 import { SimpleProgramList } from './SimpleProgramList';
 import { SimpleProgramPage } from './SimpleProgramPage';
 import { SimpleSectionEditor } from './SimpleSectionEditor';
+import { LibraryPage } from './LibraryPage';
 
 /**
  * Luồng đơn giản (mobile-first, nền tối): sau đăng nhập mở ngay chương trình
@@ -40,6 +41,14 @@ export const simpleRoutes: RouteObject[] = [
     element: (
       <RequireAuth>
         <SimpleSectionEditor />
+      </RequireAuth>
+    ),
+  },
+  {
+    path: '/thu-vien',
+    element: (
+      <RequireAuth>
+        <LibraryPage />
       </RequireAuth>
     ),
   },

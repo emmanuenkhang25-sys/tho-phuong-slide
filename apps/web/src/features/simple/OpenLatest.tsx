@@ -11,6 +11,7 @@ import { useAuth } from '../../stores/auth';
 import { ensureChurchLoaded, useChurch } from '../../stores/church';
 import { useToast } from '../../components/ui';
 import { createSimpleProgram } from './programApi';
+import { isLibraryProgram } from './library';
 
 /** Ngày Chúa Nhật gần nhất (kể cả hôm nay nếu hôm nay là Chúa Nhật), dạng YYYY-MM-DD. */
 function nextSundayISO(): string {
@@ -52,17 +53,21 @@ export function OpenLatest() {
       }
       const { data, error } = await supabase
         .from('programs')
-        .select('id')
+        .select('id,design_template')
         .eq('church_id', currentChurch.id)
         .neq('status', 'deleted')
         .order('updated_at', { ascending: false })
-        .limit(1);
+        .limit(20);
       if (error) {
         setFailed(error.message);
         return;
       }
-      if (data && data.length > 0) {
-        navigate(`/p/${data[0].id}`, { replace: true });
+      // Bỏ qua chương trình Thư viện — mở chương trình thờ phượng mới nhất.
+      const target = ((data ?? []) as { id: string; design_template?: unknown }[]).find(
+        (p) => !isLibraryProgram(p),
+      );
+      if (target) {
+        navigate(`/p/${target.id}`, { replace: true });
         return;
       }
       // Chưa có chương trình nào → tự tạo từ mẫu Chúa Nhật

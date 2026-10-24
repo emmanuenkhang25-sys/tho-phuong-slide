@@ -493,6 +493,13 @@ export function SimpleProgramPage() {
                 <span className="text-xl">📋</span> Danh sách chương trình
               </Link>
               <Link
+                to="/thu-vien"
+                onClick={() => setMenuOpen(false)}
+                className="flex min-h-[52px] items-center gap-3 rounded-xl px-3 text-base font-medium text-slate-200 hover:bg-white/5"
+              >
+                <span className="text-xl">📚</span> Thư viện bài hát &amp; Kinh Thánh
+              </Link>
+              <Link
                 to="/hoi-thanh"
                 onClick={() => setMenuOpen(false)}
                 className="flex min-h-[52px] items-center gap-3 rounded-xl px-3 text-base font-medium text-slate-200 hover:bg-white/5"

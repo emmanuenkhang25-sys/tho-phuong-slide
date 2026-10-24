@@ -12,6 +12,7 @@ import { useToast } from '../../components/ui';
 import { Modal } from '../../components/ui';
 import { PROGRAM_TEMPLATES } from '../templates/programTemplates';
 import { cloneSimpleProgram, createSimpleProgram } from './programApi';
+import { isLibraryProgram } from './library';
 import { formatDate } from '../../lib/format';
 
 interface ProgramRow {
@@ -47,12 +48,17 @@ export function SimpleProgramList() {
       setLoading(true);
       const { data } = await supabase
         .from('programs')
-        .select('id,church_id,title,event_date,updated_at')
+        .select('id,church_id,title,event_date,updated_at,design_template')
         .eq('church_id', currentChurch.id)
         .neq('status', 'deleted')
         .order('updated_at', { ascending: false })
         .limit(100);
-      setPrograms((data ?? []) as ProgramRow[]);
+      // Giấu chương trình Thư viện khỏi danh sách chương trình.
+      setPrograms(
+        ((data ?? []) as (ProgramRow & { design_template?: unknown })[]).filter(
+          (p) => !isLibraryProgram(p),
+        ),
+      );
       setLoading(false);
     };
     void load();

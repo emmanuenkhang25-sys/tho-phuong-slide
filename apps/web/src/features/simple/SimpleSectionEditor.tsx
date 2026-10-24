@@ -27,6 +27,12 @@ import type {
 } from '../../lib/types';
 import { sectionEditorType, sectionFormHint, type SectionEditorType } from './sectionForms';
 import { duplicateSimpleSection } from './programApi';
+import {
+  fetchLibraryItems,
+  findLibraryProgram,
+  foldVi,
+  type LibraryItem,
+} from './library';
 
 /** Object text có cỡ chữ lớn nhất trong slide (phần "thân bài"). */
 function biggestText(slide: { content: { objects: SlideObject[] } }): SlideObject | undefined {
@@ -269,6 +275,46 @@ const DraftCard = memo(function DraftCard({
   );
 });
 
+/** Gợi ý từ Thư viện khi gõ tên bài hát / tham chiếu (bấm là chèn nguyên slide). */
+function LibraryDropdown({
+  matches,
+  loading,
+  loaded,
+  query,
+  onPick,
+}: {
+  matches: LibraryItem[];
+  loading: boolean;
+  loaded: boolean;
+  query: string;
+  onPick: (item: LibraryItem) => void;
+}) {
+  if (query.trim() === '') return null;
+  return (
+    <div className="mt-2 flex flex-col gap-1">
+      {loading && <p className="text-xs text-slate-500">Đang tìm trong thư viện…</p>}
+      {!loading &&
+        matches.map((item) => (
+          <button
+            key={item.section.id}
+            type="button"
+            onClick={() => onPick(item)}
+            className="flex min-h-[48px] items-center gap-2 rounded-xl border border-violet-500/30 bg-violet-500/10 px-3 text-left text-sm font-bold text-violet-200"
+          >
+            <span>{item.kind === 'lyrics' ? '🎵' : '📖'}</span>
+            <span className="min-w-0 flex-1 truncate">{item.displayTitle}</span>
+            <span className="shrink-0 text-xs font-normal text-slate-400">
+              {item.slides.length} slide · bấm để chèn
+            </span>
+          </button>
+        ))}
+      {!loading && loaded && query.trim().length >= 2 && matches.length === 0 && (
+        <p className="text-xs text-slate-500">Không tìm thấy trong thư viện.</p>
+      )}
+    </div>
+  );
+}
+
 export function SimpleSectionEditor() {
   const { id: programId, sectionId } = useParams<{ id: string; sectionId: string }>();
   const { toast } = useToast();
@@ -297,10 +343,16 @@ export function SimpleSectionEditor() {
   const [bgBusy, setBgBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLInputElement>(null);
+  const pptxRef = useRef<HTMLInputElement>(null);
   const [videoBusy, setVideoBusy] = useState(false);
+  const [pptxBusy, setPptxBusy] = useState(false);
   /** Slide đang sửa chữ tại chỗ (null = không sửa slide nào). */
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [previewIdx, setPreviewIdx] = useState<number | null>(null);
+  /** Gợi ý Thư viện: tải lười khi bắt đầu gõ tên bài / tham chiếu. */
+  const [libItems, setLibItems] = useState<LibraryItem[] | null>(null);
+  const [libLoading, setLibLoading] = useState(false);
+  const [libOpen, setLibOpen] = useState(false);
 
   const editorType: SectionEditorType = useMemo(
     () => sectionEditorType(section?.kind ?? ''),
@@ -372,6 +424,60 @@ export function SimpleSectionEditor() {
     if (first) return first;
     return defaultSectionBg;
   }, [customBg, slides, defaultSectionBg]);
+
+  /** Tải Thư viện (lười — chỉ khi bắt đầu gõ tên bài / tham chiếu). */
+  const maybeLoadLibrary = useCallback(() => {
+    if (libItems !== null || libLoading || !program) return;
+    setLibLoading(true);
+    findLibraryProgram(supabase, program.church_id)
+      .then((lib) => (lib ? fetchLibraryItems(supabase, lib.id) : []))
+      .then((items) => setLibItems(items))
+      .catch(() => setLibItems([]))
+      .finally(() => setLibLoading(false));
+  }, [libItems, libLoading, program]);
+
+  /** Từ khóa đang gõ để tìm trong Thư viện (tên bài hát / tham chiếu). */
+  const libQuery = editorType === 'lyrics' ? songTitle : editorType === 'bible' ? reference : '';
+  const libMatches = useMemo(() => {
+    if (!libItems || libQuery.trim() === '') return [];
+    const q = foldVi(libQuery.trim());
+    const want = editorType === 'lyrics' ? 'lyrics' : 'bible';
+    return libItems
+      .filter((it) => it.kind === want && foldVi(it.matchText).includes(q))
+      .slice(0, 6);
+  }, [libItems, libQuery, editorType]);
+
+  /**
+   * Chèn bài từ Thư viện: copy NGUYÊN slide đã làm sẵn (giữ đúng chia dòng,
+   * màu, vị trí chữ) thành bản nháp — bấm “Lưu nội dung” là vào chương trình.
+   */
+  const insertLibraryItem = (item: LibraryItem) => {
+    const fromLib: SlideDraft[] = item.slides.map((s) => ({
+      objects: s.content.objects.map((o) => ({ ...o, id: uuid() })),
+      background: s.background,
+      label: item.displayTitle,
+    }));
+    basesRef.current = fromLib.map((d) => d.objects.map((o) => o.fontSize ?? 0));
+    setDraftScales(fromLib.map(() => 1));
+    setDrafts(fromLib);
+    setEditingIdx(null);
+    const bodies = item.slides
+      .map((sl) => biggestText(sl)?.text?.trim() ?? '')
+      .filter(Boolean)
+      .join('\n\n');
+    if (item.kind === 'lyrics') {
+      setSongTitle(item.displayTitle);
+    } else {
+      const first = item.slides[0];
+      setReference(first ? smallText(first)?.text?.trim() || item.section.title : '');
+    }
+    setContent(bodies);
+    setLibOpen(false);
+    toast(
+      `Đã chèn “${item.displayTitle}” (${fromLib.length} slide). Bấm “Lưu nội dung” để lưu.`,
+      'success',
+    );
+  };
 
   /** Tạo slide từ nội dung đã nhập (theo loại mục). */
   const generateSlides = () => {
@@ -545,6 +651,62 @@ export function SimpleSectionEditor() {
       toast('Không đọc được file video.', 'error');
     } finally {
       setVideoBusy(false);
+    }
+  };
+
+  /** Nhập PowerPoint vào mục giảng: mỗi slide .pptx thành 1 slide chữ (chỉ lấy chữ). */
+  const onPickPptx = async (file: File | undefined) => {
+    if (!file || !programId || !sectionId) return;
+    const MAX_PPTX = 30 * 1024 * 1024;
+    if (file.size > MAX_PPTX) {
+      toast('File PowerPoint quá lớn (tối đa 30MB).', 'error');
+      return;
+    }
+    setPptxBusy(true);
+    try {
+      // Tải lười để code đọc zip không nằm trong gói chính.
+      const { extractPptxSlideTexts } = await import('../export/lib/pptxImport');
+      const { texts, skipped } = await extractPptxSlideTexts(file);
+      if (texts.length === 0) {
+        toast('Không trích được chữ nào từ file PowerPoint này.', 'error');
+        return;
+      }
+      const imported: SlideDraft[] = texts.map((text, k) => ({
+        objects: [
+          {
+            id: uuid(),
+            type: 'text',
+            x: 8,
+            y: 22,
+            w: 84,
+            h: 60,
+            z: 5,
+            text,
+            fontFamily: 'Arial, sans-serif',
+            fontSize: 40,
+            color: '#ffffff',
+            bold: false,
+            align: 'center',
+            lineHeight: 1.4,
+          },
+        ],
+        background: { ...background },
+        label: `PowerPoint ${k + 1}`,
+      }));
+      const next = drafts ? [...drafts, ...imported] : imported;
+      basesRef.current = next.map((d) => d.objects.map((o) => o.fontSize ?? 0));
+      setDraftScales(next.map(() => 1));
+      setDrafts(next);
+      toast(
+        `Đã nhập ${texts.length} slide từ PowerPoint${
+          skipped > 0 ? ` (${skipped} slide trống đã bỏ qua)` : ''
+        }. Bấm “Lưu nội dung” để lưu.`,
+        'success',
+      );
+    } catch (e) {
+      toast(`Nhập PowerPoint lỗi: ${(e as Error).message}`, 'error');
+    } finally {
+      setPptxBusy(false);
     }
   };
 
@@ -800,10 +962,30 @@ export function SimpleSectionEditor() {
             <label className={labelCls}>Tên bài hát</label>
             <input
               value={songTitle}
-              onChange={(e) => setSongTitle(e.target.value)}
+              onChange={(e) => {
+                setSongTitle(e.target.value);
+                setLibOpen(true);
+                void maybeLoadLibrary();
+              }}
+              onFocus={() => {
+                setLibOpen(true);
+                void maybeLoadLibrary();
+              }}
               placeholder="VD: Ngợi khen Chúa"
               className={inputCls}
             />
+            <p className="mt-1 text-xs text-slate-500">
+              Gõ tên bài đã lưu trong 📚 Thư viện là hiện gợi ý — bấm là chèn nguyên slide.
+            </p>
+            {libOpen && (
+              <LibraryDropdown
+                matches={libMatches}
+                loading={libLoading}
+                loaded={libItems !== null}
+                query={songTitle}
+                onPick={insertLibraryItem}
+              />
+            )}
           </div>
         )}
         {editorType === 'bible' && (
@@ -811,10 +993,27 @@ export function SimpleSectionEditor() {
             <label className={labelCls}>Tham chiếu (VD: Giăng 3:16)</label>
             <input
               value={reference}
-              onChange={(e) => setReference(e.target.value)}
+              onChange={(e) => {
+                setReference(e.target.value);
+                setLibOpen(true);
+                void maybeLoadLibrary();
+              }}
+              onFocus={() => {
+                setLibOpen(true);
+                void maybeLoadLibrary();
+              }}
               placeholder="Giăng 3:16"
               className={inputCls}
             />
+            {libOpen && (
+              <LibraryDropdown
+                matches={libMatches}
+                loading={libLoading}
+                loaded={libItems !== null}
+                query={reference}
+                onPick={insertLibraryItem}
+              />
+            )}
           </div>
         )}
         {editorType === 'sermon' && (
@@ -956,6 +1155,36 @@ export function SimpleSectionEditor() {
             }}
           />
         </div>
+
+        {/* Nhập PowerPoint làm sẵn vào mục giảng */}
+        {editorType === 'sermon' && (
+          <div className="mb-3">
+            <button
+              type="button"
+              onClick={() => pptxRef.current?.click()}
+              disabled={pptxBusy}
+              className="flex min-h-[52px] w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-[#1b1e22] px-3 text-sm font-bold text-slate-200 disabled:opacity-50"
+            >
+              {pptxBusy ? '⏳ Đang đọc file…' : '📊 Nhập PowerPoint (.pptx)'}
+            </button>
+            <p className="mt-1 text-xs text-slate-500">
+              Mỗi slide PowerPoint thành 1 slide chữ trong mục giảng (chỉ lấy chữ, không
+              lấy ảnh/hiệu ứng) — bấm “Lưu nội dung” để lưu.
+            </p>
+            <input
+              ref={pptxRef}
+              type="file"
+              accept=".pptx"
+              className="hidden"
+              aria-label="Chọn file PowerPoint"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                e.target.value = '';
+                void onPickPptx(f);
+              }}
+            />
+          </div>
+        )}
 
         <button onClick={generateSlides} disabled={busy} className={btnPrimary + ' w-full'}>
           ✨ Tự động tạo slide
