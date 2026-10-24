@@ -87,18 +87,28 @@ export function HoiThanh() {
       toast('Vui lòng nhập tên hội thánh.', 'error');
       return;
     }
-    setCreating(true);
-    const { data, error } = await supabase
-      .from('churches')
-      .insert({ name: newName.trim(), contact_info: newContact.trim() || null, created_by: user.id })
-      .select('id, name')
-      .single();
-    if (error || !data) {
-      setCreating(false);
-      toast(`Tạo hội thánh lỗi: ${error?.message ?? 'không rõ'}`, 'error');
+    // 1. Xác thực phiên đăng nhập với server trước khi ghi (tránh token hết hạn)
+    const { data: userData, error: userErr } = await supabase.auth.getUser();
+    if (userErr || !userData.user) {
+      toast('Phiên đăng nhập đã hết hạn. Vui lòng đăng xuất rồi đăng nhập lại.', 'error');
       return;
     }
-    const churchId = (data as { id: string }).id;
+    setCreating(true);
+    // 2. Tạo id ở máy khách và INSERT không kèm .select() (không dùng RETURNING):
+    //    tránh lỗi RLS ở bước đọc-lại-ngay-sau-ghi (trigger thêm owner chạy trong
+    //    lúc insert; đọc lại riêng sau đó sẽ thấy quyền owner đầy đủ).
+    const churchId = crypto.randomUUID();
+    const { error } = await supabase.from('churches').insert({
+      id: churchId,
+      name: newName.trim(),
+      contact_info: newContact.trim() || null,
+      created_by: userData.user.id,
+    });
+    if (error) {
+      setCreating(false);
+      toast(`Tạo hội thánh lỗi: ${error.message}`, 'error');
+      return;
+    }
 
     // Upload logo (nếu có) lên bucket church-logos/<church_id>/...
     if (newLogo) {
