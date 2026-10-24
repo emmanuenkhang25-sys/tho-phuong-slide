@@ -14,7 +14,7 @@ export function DangNhap() {
   const [busy, setBusy] = useState(false);
 
   if (initialized && user) {
-    const from = (location.state as { from?: string } | null)?.from ?? '/p';
+    const from = (location.state as { from?: string } | null)?.from ?? '/bat-dau';
     return <Navigate to={from} replace />;
   }
 
@@ -33,7 +33,7 @@ export function DangNhap() {
       return;
     }
     toast('Đăng nhập thành công. Chào mừng trở lại!', 'success');
-    const from = (location.state as { from?: string } | null)?.from ?? '/p';
+    const from = (location.state as { from?: string } | null)?.from ?? '/bat-dau';
     navigate(from, { replace: true });
   };
 

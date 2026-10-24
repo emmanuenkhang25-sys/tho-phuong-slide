@@ -51,7 +51,7 @@ export function DatLaiMatKhau() {
       return;
     }
     toast('Đổi mật khẩu thành công!', 'success');
-    navigate('/dashboard', { replace: true });
+    navigate('/bat-dau', { replace: true });
   };
 
   return (

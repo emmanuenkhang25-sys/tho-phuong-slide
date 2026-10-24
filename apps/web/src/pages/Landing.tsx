@@ -37,7 +37,7 @@ const FEATURES = [
 
 export function Landing() {
   const { user, initialized } = useAuth();
-  if (initialized && user) return <Navigate to="/dashboard" replace />;
+  if (initialized && user) return <Navigate to="/bat-dau" replace />;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-church-900 via-church-800 to-church-950 text-white">

@@ -9,7 +9,7 @@ export function NotFound() {
         title="Không tìm thấy trang"
         message="Địa chỉ bạn truy cập không tồn tại hoặc đã bị di chuyển."
         action={
-          <Link to="/dashboard">
+          <Link to="/bat-dau">
             <Button>Về trang Tổng quan</Button>
           </Link>
         }

@@ -8,9 +8,7 @@ import { Button, EnvWarning, Spinner, useToast } from './ui';
 
 const NAV = [
   { to: '/p', label: 'Chương trình', icon: '📋' },
-  { to: '/dashboard', label: 'Tổng quan', icon: '🏠' },
   { to: '/hoi-thanh', label: 'Hội thánh', icon: '⛪' },
-  { to: '/mau-slide', label: 'Mẫu slide', icon: '🖼️' },
   { to: '/sao-luu', label: 'Sao lưu', icon: '💾' },
   { to: '/huong-dan', label: 'Hướng dẫn', icon: '❓' },
   { to: '/cai-dat', label: 'Cài đặt', icon: '⚙️' },
@@ -127,7 +125,7 @@ export function Layout() {
     <div className="flex min-h-screen bg-slate-50 dark:bg-slate-950">
       {/* Sidebar — desktop */}
       <aside className="hidden w-64 shrink-0 flex-col border-r border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 md:flex">
-        <Link to="/dashboard" className="mb-4 flex min-h-touch items-center gap-2 px-2">
+        <Link to="/bat-dau" className="mb-4 flex min-h-touch items-center gap-2 px-2">
           <img src="/icon.svg" alt="" className="h-9 w-9" />
           <span className="text-lg font-bold text-church-800 dark:text-church-300">Thờ Phượng Slide</span>
         </Link>
@@ -161,7 +159,7 @@ export function Layout() {
         <EnvWarning />
         {/* Header mobile */}
         <header className="flex items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-2 dark:border-slate-800 dark:bg-slate-900 md:hidden">
-          <Link to="/dashboard" className="flex min-h-touch items-center gap-2">
+          <Link to="/bat-dau" className="flex min-h-touch items-center gap-2">
             <img src="/icon.svg" alt="" className="h-8 w-8" />
             <span className="font-bold text-church-800 dark:text-church-300">Thờ Phượng Slide</span>
           </Link>

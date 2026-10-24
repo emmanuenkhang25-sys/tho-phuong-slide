@@ -1,11 +1,13 @@
 // ============================================================================
-// Thờ Phượng Slide — giao diện đơn giản (mobile-first)
-// SimpleProgramPage — màn hình CHƯƠNG TRÌNH: header gọn + danh sách mục.
+// Thờ Phượng Slide — giao diện đơn giản (mobile-first, nền tối)
+// SimpleProgramPage — MÀN HÌNH CHÍNH: mở app là thấy ngay thứ tự chương trình.
+// Thẻ xanh tiêu đề + danh sách mục đánh số (xóa, lên/xuống), bấm vào mục để sửa.
 // ============================================================================
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
-import { useChurch } from '../../stores/church';
+import { useAuth } from '../../stores/auth';
+import { ensureChurchLoaded, useChurch } from '../../stores/church';
 import { Modal, useToast } from '../../components/ui';
 import { SECTION_KINDS, sectionKindLabel } from '../editor/lib/editorUtils';
 import { SlideRenderer } from '../editor/components/SlideRenderer';
@@ -13,9 +15,13 @@ import { exportPPTX } from '../export/lib/pptx';
 import { downloadBlob, exportFilename } from '../export/lib/units';
 import type { Program, Section, Slide } from '../../lib/types';
 import { uuid } from '../editor/lib/editorUtils';
+import { sectionFormHint } from './sectionForms';
+import { createSimpleProgram } from './programApi';
+import { formatDate } from '../../lib/format';
 
 export function SimpleProgramPage() {
   const { id } = useParams<{ id: string }>();
+  const { user, signOut } = useAuth();
   const { currentChurch } = useChurch();
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -25,14 +31,30 @@ export function SimpleProgramPage() {
   const [slides, setSlides] = useState<Slide[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const [title, setTitle] = useState('');
   const [eventDate, setEventDate] = useState('');
+  const [showEditHeader, setShowEditHeader] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [newName, setNewName] = useState('');
   const [newKind, setNewKind] = useState('custom');
   const [showPreview, setShowPreview] = useState(false);
   const [exporting, setExporting] = useState(false);
+
+  useEffect(() => {
+    void ensureChurchLoaded();
+  }, []);
+
+  // Đóng ngăn kéo menu bằng phím Escape
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [menuOpen]);
 
   useEffect(() => {
     if (!id) return;
@@ -41,7 +63,7 @@ export function SimpleProgramPage() {
       const { data: p } = await supabase.from('programs').select('*').eq('id', id).single();
       if (!p) {
         toast('Không tìm thấy chương trình.', 'error');
-        navigate('/p', { replace: true });
+        navigate('/bat-dau', { replace: true });
         return;
       }
       const prog = p as Program;
@@ -93,6 +115,7 @@ export function SimpleProgramPage() {
       return;
     }
     setProgram({ ...program, title: title.trim() || program.title, event_date: eventDate || null });
+    setShowEditHeader(false);
     toast('Đã lưu chương trình.', 'success');
   };
 
@@ -153,6 +176,50 @@ export function SimpleProgramPage() {
     toast('Đã thêm mục mới.', 'success');
   };
 
+  /** Xóa một mục kèm toàn bộ slide của nó (cần xác nhận). */
+  const deleteSection = async (s: Section) => {
+    if (!id) return;
+    const n = slideCountOf(s.id);
+    if (!window.confirm(`Xóa mục “${s.title}”${n > 0 ? ` và ${n} slide` : ''} của nó?`)) return;
+    setBusy(true);
+    try {
+      const { error: slErr } = await supabase.from('slides').delete().eq('section_id', s.id);
+      if (slErr)
+        throw new Error(`Không xóa được slide (cần quyền Quản trị viên): ${slErr.message}`);
+      const { error: sErr } = await supabase.from('sections').delete().eq('id', s.id);
+      if (sErr) throw new Error(`Xóa mục lỗi: ${sErr.message}`);
+      setSections((xs) => xs.filter((x) => x.id !== s.id).map((x, i) => ({ ...x, order_index: i })));
+      toast('Đã xóa mục.', 'success');
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Tạo nhanh chương trình Chúa Nhật mới từ mẫu rồi mở ngay. */
+  const quickNewProgram = async () => {
+    if (!currentChurch || !user) {
+      toast('Chưa có hội thánh. Hãy tạo hội thánh trước.', 'error');
+      navigate('/hoi-thanh');
+      return;
+    }
+    setBusy(true);
+    try {
+      const pid = await createSimpleProgram(supabase, {
+        churchId: currentChurch.id,
+        userId: user.id,
+        templateId: 'chu-nhat',
+      });
+      toast('Đã tạo chương trình Chúa Nhật mới.', 'success');
+      navigate(`/p/${pid}`);
+    } catch (e) {
+      toast(`Tạo chương trình lỗi: ${(e as Error).message}`, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const doExportPPTX = async () => {
     if (!program) return;
     if (slides.length === 0) {
@@ -176,163 +243,280 @@ export function SimpleProgramPage() {
     }
   };
 
+  const handleSignOut = async () => {
+    setMenuOpen(false);
+    await signOut();
+    navigate('/dang-nhap', { replace: true });
+  };
+
   if (loading) {
     return (
-      <div className="mx-auto max-w-xl bg-slate-50 px-4 py-10 text-center text-slate-400">
-        Đang tải chương trình…
+      <div className="mx-auto flex min-h-screen w-full max-w-xl items-center justify-center bg-[#0e0f11] px-4">
+        <p className="text-slate-400">Đang tải chương trình…</p>
       </div>
     );
   }
   if (!program) return null;
 
+  const rowDesc = (s: Section) => {
+    const hint = sectionFormHint(s.kind);
+    const base = hint.heading !== 'Nội dung mục' ? hint.heading : sectionKindLabel(s.kind);
+    const n = slideCountOf(s.id);
+    return `${base} · ${n} slide`;
+  };
+
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-xl flex-col bg-slate-50 px-4 pb-10 pt-4">
-      {/* Header chương trình */}
-      <div className="rounded-2xl bg-white p-4 shadow-sm">
-        <div className="mb-2 flex items-center gap-2">
-          <button
-            onClick={() => navigate('/p')}
-            aria-label="Quay lại danh sách"
-            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-xl text-slate-500"
-          >
-            ←
-          </button>
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onBlur={() => void saveHeader()}
-            aria-label="Tên chương trình"
-            className="min-w-0 flex-1 rounded-lg border border-transparent px-2 py-1 text-lg font-bold text-slate-900 focus:border-blue-400"
-          />
-        </div>
-        <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-sm text-slate-500">
-          <span className="truncate">⛪ {currentChurch?.name ?? ''}</span>
-          <label className="flex items-center gap-1">
-            📅
-            <input
-              type="date"
-              value={eventDate}
-              onChange={(e) => setEventDate(e.target.value)}
-              onBlur={() => void saveHeader()}
-              aria-label="Ngày tổ chức"
-              className="rounded-lg border border-slate-200 px-2 py-1 text-sm text-slate-700"
-            />
-          </label>
-        </div>
-        <div className="grid grid-cols-4 gap-2">
-          <button
-            onClick={() => void saveHeader()}
-            disabled={busy}
-            className="flex min-h-[52px] flex-col items-center justify-center rounded-xl bg-blue-600 font-bold text-white disabled:opacity-50"
-          >
-            <span className="text-lg">💾</span>
-            <span className="text-xs">Lưu</span>
-          </button>
-          <button
-            onClick={() => setShowPreview(true)}
-            className="flex min-h-[52px] flex-col items-center justify-center rounded-xl border border-slate-200 bg-white font-bold text-slate-700"
-          >
-            <span className="text-lg">👁</span>
-            <span className="text-xs">Xem trước</span>
-          </button>
-          <button
-            onClick={() => navigate(`/trinh-chieu/${program.id}`)}
-            className="flex min-h-[52px] flex-col items-center justify-center rounded-xl bg-emerald-600 font-bold text-white"
-          >
-            <span className="text-lg">▶️</span>
-            <span className="text-xs">Chiếu</span>
-          </button>
-          <button
-            onClick={() => void doExportPPTX()}
-            disabled={exporting || slides.length === 0}
-            className="flex min-h-[52px] flex-col items-center justify-center rounded-xl bg-amber-500 font-bold text-white disabled:opacity-50"
-          >
-            <span className="text-lg">⬇</span>
-            <span className="text-xs">{exporting ? '…' : 'PPTX'}</span>
-          </button>
-        </div>
+    <div className="mx-auto flex min-h-screen w-full max-w-xl flex-col bg-[#0e0f11] px-4 pb-10 pt-3 text-slate-100">
+      {/* Thanh trên: menu + tạo nhanh */}
+      <div className="mb-3 flex items-center justify-between">
+        <button
+          onClick={() => setMenuOpen(true)}
+          aria-label="Mở menu"
+          className="flex min-h-[48px] min-w-[48px] items-center justify-center rounded-full bg-[#1b1e22] text-xl text-slate-200"
+        >
+          ☰
+        </button>
+        <button
+          onClick={() => void quickNewProgram()}
+          disabled={busy}
+          aria-label="Tạo chương trình Chúa Nhật mới"
+          title="Tạo chương trình Chúa Nhật mới"
+          className="flex min-h-[48px] items-center gap-1 rounded-full bg-[#1b1e22] px-4 text-base font-bold text-slate-200 disabled:opacity-50"
+        >
+          <span className="text-xl">＋</span> Mới
+        </button>
       </div>
 
+      {/* Thẻ xanh tiêu đề chương trình */}
+      <button
+        onClick={() => setShowEditHeader(true)}
+        className="block w-full rounded-3xl bg-gradient-to-b from-[#35684a] to-[#234a31] p-6 text-center shadow-lg"
+        aria-label="Chạm để sửa tên và ngày chương trình"
+      >
+        <span className="block text-2xl font-extrabold uppercase leading-snug tracking-wide text-white">
+          {program.title}
+        </span>
+        <span className="mt-2 block text-sm font-medium uppercase tracking-wider text-white/70">
+          {currentChurch?.name ?? 'Hội Thánh'} ·{' '}
+          {program.event_date ? formatDate(program.event_date) : 'Chúa Nhật'}
+        </span>
+        <span className="mt-1 block text-xs text-white/40">✎ chạm để sửa tên / ngày</span>
+      </button>
+
+      {/* Hàng nút thao tác */}
+      <div className="mt-3 grid grid-cols-4 gap-2">
+        <button
+          onClick={() => void saveHeader()}
+          disabled={busy}
+          className="flex min-h-[60px] flex-col items-center justify-center gap-0.5 rounded-2xl bg-[#1b6fe0] font-bold text-white disabled:opacity-50"
+        >
+          <span className="text-xl">💾</span>
+          <span className="text-xs">Lưu</span>
+        </button>
+        <button
+          onClick={() => setShowPreview(true)}
+          className="flex min-h-[60px] flex-col items-center justify-center gap-0.5 rounded-2xl bg-[#1b1e22] font-bold text-slate-200"
+        >
+          <span className="text-xl">👁</span>
+          <span className="text-xs">Xem trước</span>
+        </button>
+        <button
+          onClick={() => navigate(`/trinh-chieu/${program.id}`)}
+          className="flex min-h-[60px] flex-col items-center justify-center gap-0.5 rounded-2xl bg-[#0d9d5b] font-bold text-white"
+        >
+          <span className="text-xl">▶️</span>
+          <span className="text-xs">Chiếu</span>
+        </button>
+        <button
+          onClick={() => void doExportPPTX()}
+          disabled={exporting || slides.length === 0}
+          className="flex min-h-[60px] flex-col items-center justify-center gap-0.5 rounded-2xl bg-[#c07f10] font-bold text-white disabled:opacity-50"
+        >
+          <span className="text-xl">⬇</span>
+          <span className="text-xs">{exporting ? '…' : 'PPTX'}</span>
+        </button>
+      </div>
+
+      {/* Tiêu đề danh sách mục */}
+      <div className="mb-1 mt-5 flex items-center justify-between px-1">
+        <h2 className="text-lg font-bold text-white">Nội dung chương trình</h2>
+        <span className="rounded-full bg-[#23262b] px-3 py-1 text-xs font-bold text-slate-300">
+          {sections.length} mục
+        </span>
+      </div>
+      <p className="mb-3 px-1 text-sm text-slate-400">
+        Bấm vào từng mục để nhập nội dung và tạo slide.
+      </p>
+
       {/* Danh sách mục */}
-      <h2 className="mb-2 mt-4 px-1 text-sm font-bold uppercase tracking-wide text-slate-400">
-        Các mục trong chương trình ({sections.length})
-      </h2>
-      <ul className="flex flex-col gap-2">
+      <ul className="flex flex-col gap-2.5">
         {sections.map((s, i) => (
-          <li key={s.id} className="rounded-2xl bg-white p-2 shadow-sm">
-            <div className="flex items-center gap-1">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-100 text-base font-bold text-blue-700">
-                {i + 1}
-              </span>
+          <li
+            key={s.id}
+            className="flex items-center gap-3 rounded-2xl border border-white/5 bg-[#16181c] p-3"
+          >
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#2b2f34] text-xl font-extrabold text-white">
+              {i + 1}
+            </span>
+            <button
+              onClick={() => navigate(`/p/${program.id}/muc/${s.id}`)}
+              className="min-w-0 flex-1 rounded-xl py-1 text-left"
+              aria-label={`Mở mục ${s.title}`}
+            >
+              <span className="block truncate text-lg font-bold text-white">{s.title}</span>
+              <span className="block truncate text-sm text-slate-400">{rowDesc(s)}</span>
+            </button>
+            <span className="flex shrink-0 items-center gap-1">
               <button
-                onClick={() => navigate(`/p/${program.id}/muc/${s.id}`)}
-                className="flex min-w-0 flex-1 items-center gap-2 rounded-xl p-2 text-left"
+                onClick={() => void deleteSection(s)}
+                disabled={busy}
+                title="Xóa mục"
+                aria-label={`Xóa mục ${s.title}`}
+                className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-lg text-slate-400 disabled:opacity-30"
               >
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-base font-bold text-slate-900">{s.title}</span>
-                  <span className="block text-xs text-slate-400">
-                    {sectionKindLabel(s.kind)} · {slideCountOf(s.id)} slide
-                  </span>
-                </span>
-                <span className="text-xl text-slate-300" aria-hidden>›</span>
+                🗑
               </button>
-              <span className="flex shrink-0 flex-col gap-1">
-                <button
-                  onClick={() => void moveSection(i, -1)}
-                  disabled={i === 0}
-                  title="Chuyển mục lên"
-                  aria-label={`Chuyển ${s.title} lên`}
-                  className="flex min-h-[40px] min-w-[44px] items-center justify-center rounded-lg border border-slate-200 text-slate-500 disabled:opacity-30"
-                >
-                  ▲
-                </button>
-                <button
-                  onClick={() => void moveSection(i, 1)}
-                  disabled={i === sections.length - 1}
-                  title="Chuyển mục xuống"
-                  aria-label={`Chuyển ${s.title} xuống`}
-                  className="flex min-h-[40px] min-w-[44px] items-center justify-center rounded-lg border border-slate-200 text-slate-500 disabled:opacity-30"
-                >
-                  ▼
-                </button>
-              </span>
-            </div>
+              <button
+                onClick={() => void moveSection(i, -1)}
+                disabled={i === 0 || busy}
+                title="Chuyển mục lên"
+                aria-label={`Chuyển ${s.title} lên`}
+                className="flex min-h-[44px] min-w-[40px] items-center justify-center rounded-xl text-lg text-slate-300 disabled:opacity-20"
+              >
+                ∧
+              </button>
+              <button
+                onClick={() => void moveSection(i, 1)}
+                disabled={i === sections.length - 1 || busy}
+                title="Chuyển mục xuống"
+                aria-label={`Chuyển ${s.title} xuống`}
+                className="flex min-h-[44px] min-w-[40px] items-center justify-center rounded-xl text-lg text-slate-300 disabled:opacity-20"
+              >
+                ∨
+              </button>
+            </span>
           </li>
         ))}
       </ul>
 
       <button
         onClick={() => setShowAdd(true)}
-        className="mt-3 flex min-h-[56px] items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-300 text-base font-bold text-slate-500"
+        className="mt-3 flex min-h-[56px] items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-white/15 text-base font-bold text-slate-300"
       >
         ＋ Thêm mục mới
       </button>
 
-      <Link
-        to={`/chuong-trinh/${program.id}`}
-        className="mt-4 text-center text-sm text-slate-400 underline"
-      >
-        🛠 Chế độ nâng cao (chỉnh nền, vị trí chữ…)
-      </Link>
+      {/* Ngăn kéo menu */}
+      {menuOpen && (
+        <div className="fixed inset-0 z-50" role="dialog" aria-label="Menu">
+          <div
+            className="absolute inset-0 bg-black/60"
+            onClick={() => setMenuOpen(false)}
+            aria-hidden
+          />
+          <nav className="absolute left-0 top-0 flex h-full w-72 max-w-[80vw] flex-col bg-[#141619] p-4 shadow-2xl">
+            <p className="mb-1 px-2 text-lg font-extrabold text-white">⛪ Thờ Phượng Slide</p>
+            {currentChurch && (
+              <p className="mb-4 truncate px-2 text-sm text-slate-400">{currentChurch.name}</p>
+            )}
+            <div className="flex flex-col gap-1">
+              <Link
+                to="/p"
+                onClick={() => setMenuOpen(false)}
+                className="flex min-h-[52px] items-center gap-3 rounded-xl px-3 text-base font-medium text-slate-200 hover:bg-white/5"
+              >
+                <span className="text-xl">📋</span> Danh sách chương trình
+              </Link>
+              <Link
+                to="/hoi-thanh"
+                onClick={() => setMenuOpen(false)}
+                className="flex min-h-[52px] items-center gap-3 rounded-xl px-3 text-base font-medium text-slate-200 hover:bg-white/5"
+              >
+                <span className="text-xl">⛪</span> Hội thánh
+              </Link>
+              <Link
+                to="/sao-luu"
+                onClick={() => setMenuOpen(false)}
+                className="flex min-h-[52px] items-center gap-3 rounded-xl px-3 text-base font-medium text-slate-200 hover:bg-white/5"
+              >
+                <span className="text-xl">💾</span> Sao lưu
+              </Link>
+              <Link
+                to="/huong-dan"
+                onClick={() => setMenuOpen(false)}
+                className="flex min-h-[52px] items-center gap-3 rounded-xl px-3 text-base font-medium text-slate-200 hover:bg-white/5"
+              >
+                <span className="text-xl">❓</span> Hướng dẫn
+              </Link>
+              <Link
+                to="/cai-dat"
+                onClick={() => setMenuOpen(false)}
+                className="flex min-h-[52px] items-center gap-3 rounded-xl px-3 text-base font-medium text-slate-200 hover:bg-white/5"
+              >
+                <span className="text-xl">⚙️</span> Cài đặt
+              </Link>
+            </div>
+            <div className="mt-auto">
+              <button
+                onClick={() => void handleSignOut()}
+                className="flex min-h-[52px] w-full items-center gap-3 rounded-xl px-3 text-base font-medium text-red-400 hover:bg-white/5"
+              >
+                <span className="text-xl">🚪</span> Đăng xuất
+              </button>
+            </div>
+          </nav>
+        </div>
+      )}
+
+      {/* Sửa tên + ngày chương trình */}
+      <Modal open={showEditHeader} onClose={() => setShowEditHeader(false)} title="✎ Tên & ngày">
+        <div className="flex flex-col gap-3">
+          <div>
+            <label className="mb-1 block text-sm font-bold text-slate-300">Tên chương trình</label>
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="VD: Chương trình Chúa Nhật"
+              className="min-h-[52px] w-full rounded-xl border border-white/10 bg-[#0e0f11] px-3 text-base text-white"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-bold text-slate-300">Ngày tổ chức</label>
+            <input
+              type="date"
+              value={eventDate}
+              onChange={(e) => setEventDate(e.target.value)}
+              className="min-h-[52px] w-full rounded-xl border border-white/10 bg-[#0e0f11] px-3 text-base text-white"
+            />
+          </div>
+          <button
+            onClick={() => void saveHeader()}
+            disabled={busy}
+            className="min-h-[54px] rounded-2xl bg-[#1b6fe0] text-base font-bold text-white disabled:opacity-50"
+          >
+            💾 Lưu
+          </button>
+        </div>
+      </Modal>
 
       {/* Dialog thêm mục */}
       <Modal open={showAdd} onClose={() => setShowAdd(false)} title="＋ Thêm mục mới">
         <div className="flex flex-col gap-3">
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Tên mục</label>
+            <label className="mb-1 block text-sm font-bold text-slate-300">Tên mục</label>
             <input
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               placeholder="VD: Hát ngợi khen"
-              className="min-h-[48px] w-full rounded-xl border border-slate-300 px-3 text-base"
+              className="min-h-[52px] w-full rounded-xl border border-white/10 bg-[#0e0f11] px-3 text-base text-white"
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Loại mục</label>
+            <label className="mb-1 block text-sm font-bold text-slate-300">Loại mục</label>
             <select
               value={newKind}
               onChange={(e) => setNewKind(e.target.value)}
-              className="min-h-[48px] w-full rounded-xl border border-slate-300 bg-white px-3 text-base"
+              className="min-h-[52px] w-full rounded-xl border border-white/10 bg-[#0e0f11] px-3 text-base text-white"
             >
               {SECTION_KINDS.map((k) => (
                 <option key={k.value} value={k.value}>
@@ -344,7 +528,7 @@ export function SimpleProgramPage() {
           <button
             onClick={() => void addSection()}
             disabled={busy}
-            className="min-h-[52px] rounded-xl bg-blue-600 text-base font-bold text-white disabled:opacity-50"
+            className="min-h-[54px] rounded-2xl bg-[#1b6fe0] text-base font-bold text-white disabled:opacity-50"
           >
             Thêm mục
           </button>
@@ -358,7 +542,7 @@ export function SimpleProgramPage() {
             <p className="py-6 text-center text-slate-400">Chưa có slide nào.</p>
           )}
           {orderedSlides.map((s, i) => (
-            <div key={s.id} className="rounded-xl border border-slate-200 p-2">
+            <div key={s.id} className="rounded-xl border border-white/10 p-2">
               <p className="mb-1 text-xs font-bold text-slate-400">Slide {i + 1}</p>
               <SlideRenderer slide={s} width={320} aspect={program.aspect_ratio} />
             </div>

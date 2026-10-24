@@ -45,10 +45,10 @@ function smallText(slide: { content: { objects: SlideObject[] } }): SlideObject 
 const btnPrimary =
   'flex min-h-[56px] items-center justify-center gap-2 rounded-2xl bg-violet-600 px-4 text-base font-bold text-white disabled:opacity-50';
 const btnSecondary =
-  'flex min-h-[52px] flex-1 items-center justify-center gap-1 rounded-2xl border border-slate-300 bg-white px-2 text-sm font-bold text-slate-700 disabled:opacity-50';
+  'flex min-h-[52px] flex-1 items-center justify-center gap-1 rounded-2xl border border-white/10 bg-[#1b1e22] px-2 text-sm font-bold text-slate-200 disabled:opacity-50';
 const inputCls =
-  'min-h-[52px] w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-base text-slate-900';
-const labelCls = 'mb-1 block text-sm font-bold text-slate-700';
+  'min-h-[52px] w-full rounded-xl border border-white/10 bg-[#0e0f11] px-3 py-2 text-base text-white';
+const labelCls = 'mb-1 block text-sm font-bold text-slate-300';
 
 export function SimpleSectionEditor() {
   const { id: programId, sectionId } = useParams<{ id: string; sectionId: string }>();
@@ -104,19 +104,19 @@ export function SimpleSectionEditor() {
         .order('order_index');
       const ordered = ((sls ?? []) as Slide[]).sort((a, b) => a.order_index - b.order_index);
       setSlides(ordered);
-      // Dựng lại nội dung nguồn từ các slide hiện có
+      // Dựng lại nội dung nguồn từ các slide hiện có (mục có thể chưa có slide nào)
       const type = sectionEditorType(sec.kind);
+      const firstSlide = ordered[0];
       const bodies = ordered.map((sl) => biggestText(sl)?.text?.trim() ?? '').filter(Boolean);
       if (type === 'lyrics') {
-        setSongTitle(smallText(ordered[0])?.text?.trim() ?? '');
+        setSongTitle(firstSlide ? (smallText(firstSlide)?.text?.trim() ?? '') : '');
         setContent(bodies.join('\n\n'));
       } else if (type === 'bible') {
-        setReference(smallText(ordered[0])?.text?.trim() ?? '');
+        setReference(firstSlide ? (smallText(firstSlide)?.text?.trim() ?? '') : '');
         setContent(bodies.join('\n\n'));
       } else if (type === 'sermon') {
-        const first = ordered[0];
-        setSermonTopic(biggestText(first)?.text?.trim() ?? '');
-        setSermonVerse(smallText(first)?.text?.trim() ?? '');
+        setSermonTopic(firstSlide ? (biggestText(firstSlide)?.text?.trim() ?? '') : '');
+        setSermonVerse(firstSlide ? (smallText(firstSlide)?.text?.trim() ?? '') : '');
         setContent(
           ordered
             .slice(1)
@@ -332,7 +332,7 @@ export function SimpleSectionEditor() {
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-xl bg-slate-50 px-4 py-10 text-center text-slate-400">
+      <div className="mx-auto flex min-h-screen w-full max-w-xl items-center justify-center bg-[#0e0f11] px-4">
         Đang tải mục…
       </div>
     );
@@ -340,13 +340,13 @@ export function SimpleSectionEditor() {
   if (!section || !program) return null;
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-xl flex-col bg-slate-50 px-4 pb-10 pt-4">
+    <div className="mx-auto flex min-h-screen w-full max-w-xl flex-col bg-[#0e0f11] px-4 pb-10 pt-3 text-slate-100">
       {/* Header */}
       <div className="mb-3 flex items-center gap-2">
         <button
           onClick={() => navigate(`/p/${programId}`)}
           aria-label="Quay lại chương trình"
-          className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl bg-white text-xl text-slate-500 shadow-sm"
+          className="flex min-h-[48px] min-w-[48px] items-center justify-center rounded-full bg-[#1b1e22] text-xl text-slate-200"
         >
           ←
         </button>
@@ -354,35 +354,28 @@ export function SimpleSectionEditor() {
           value={secTitle}
           onChange={(e) => setSecTitle(e.target.value)}
           aria-label="Tên mục"
-          className="min-w-0 flex-1 rounded-xl border border-transparent bg-transparent px-2 py-1 text-lg font-bold text-slate-900 focus:border-blue-400 focus:bg-white"
+          className="min-w-0 flex-1 rounded-xl border border-transparent bg-transparent px-2 py-1 text-lg font-bold text-white focus:border-[#1b6fe0]"
         />
       </div>
 
       {/* Thao tác mục */}
-      <div className="mb-3 grid grid-cols-3 gap-2">
+      <div className="mb-3 grid grid-cols-2 gap-2">
         <button onClick={() => void duplicateSection()} disabled={busy} className={btnSecondary}>
           ⧉ Sao chép
         </button>
         <button
-          onClick={() => navigate(`/chuong-trinh/${programId}`)}
-          className={btnSecondary}
-          title="Mở trình biên tập nâng cao"
-        >
-          🛠 Nâng cao
-        </button>
-        <button
           onClick={() => void deleteSection()}
           disabled={busy}
-          className="flex min-h-[52px] flex-1 items-center justify-center gap-1 rounded-2xl border border-red-200 bg-white px-2 text-sm font-bold text-red-600 disabled:opacity-50"
+          className="flex min-h-[52px] flex-1 items-center justify-center gap-1 rounded-2xl border border-red-900/50 bg-[#1b1e22] px-2 text-sm font-bold text-red-400 disabled:opacity-50"
         >
           🗑 Xóa mục
         </button>
       </div>
 
       {/* Form theo loại mục */}
-      <div className="rounded-2xl bg-white p-4 shadow-sm">
-        <h2 className="text-base font-bold text-slate-900">{hint.heading}</h2>
-        <p className="mb-3 text-sm text-slate-500">{hint.hint}</p>
+      <div className="rounded-2xl border border-white/5 bg-[#16181c] p-4">
+        <h2 className="text-base font-bold text-white">{hint.heading}</h2>
+        <p className="mb-3 text-sm text-slate-400">{hint.hint}</p>
 
         {editorType === 'lyrics' && (
           <div className="mb-3">
@@ -441,8 +434,8 @@ export function SimpleSectionEditor() {
                   className={
                     'flex-1 rounded-xl border px-2 py-2 text-sm font-bold min-h-[48px] ' +
                     (fontPresetId === fp.id
-                      ? 'border-violet-600 bg-violet-50 text-violet-700'
-                      : 'border-slate-300 text-slate-500')
+                      ? 'border-violet-500 bg-violet-500/15 text-violet-300'
+                      : 'border-white/10 text-slate-400')
                   }
                 >
                   {fp.id === 'vua' ? '🔤 Vừa' : fp.id === 'to' ? '🔠 To' : '🔡 Cực to'}
@@ -467,7 +460,7 @@ export function SimpleSectionEditor() {
             onChange={(e) => setContent(e.target.value)}
             placeholder={hint.contentPlaceholder}
             rows={10}
-            className="min-h-[220px] w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-base text-slate-900"
+            className="min-h-[220px] w-full rounded-xl border border-white/10 bg-[#0e0f11] px-3 py-2 text-base text-white"
           />
         </div>
 
@@ -478,22 +471,22 @@ export function SimpleSectionEditor() {
 
       {/* Bản xem trước các slide vừa tạo */}
       {drafts && (
-        <div className="mt-3 rounded-2xl bg-white p-4 shadow-sm">
+        <div className="mt-3 rounded-2xl border border-white/5 bg-[#16181c] p-4">
           <div className="mb-2 flex items-center justify-between">
-            <h3 className="text-base font-bold text-slate-900">
+            <h3 className="text-base font-bold text-white">
               Xem trước ({drafts.length} slide)
             </h3>
             <button
               onClick={() => setEditSlides((v) => !v)}
-              className="rounded-xl border border-slate-300 px-3 py-2 text-sm font-bold text-slate-600 min-h-[44px]"
+              className="rounded-xl border border-white/10 px-3 py-2 text-sm font-bold text-slate-300 min-h-[44px]"
             >
               {editSlides ? '✓ Xong' : '✏️ Chỉnh sửa slide'}
             </button>
           </div>
           <div className="flex flex-col gap-3">
             {drafts.map((d, i) => (
-              <div key={i} className="rounded-xl border border-slate-200 p-2">
-                <p className="mb-1 text-xs font-bold text-slate-400">Slide {i + 1}</p>
+              <div key={i} className="rounded-xl border border-white/10 p-2">
+                <p className="mb-1 text-xs font-bold text-slate-500">Slide {i + 1}</p>
                 <SlideRenderer slide={toPreviewSlide(d)} width={300} aspect={program.aspect_ratio} />
                 {editSlides && (
                   <textarea
@@ -512,7 +505,7 @@ export function SimpleSectionEditor() {
                     }
                     onChange={(e) => editDraftText(i, e.target.value)}
                     rows={4}
-                    className="mt-1 min-h-[80px] w-full rounded-lg border border-slate-300 px-2 py-1 font-mono text-xs"
+                    className="mt-1 min-h-[80px] w-full rounded-lg border border-white/10 bg-[#0e0f11] px-2 py-1 font-mono text-xs text-slate-200"
                   />
                 )}
               </div>
@@ -521,14 +514,14 @@ export function SimpleSectionEditor() {
           <div className="mt-3 grid grid-cols-2 gap-2">
             <button
               onClick={() => setPreviewIdx(0)}
-              className="flex min-h-[52px] items-center justify-center gap-1 rounded-2xl border border-slate-300 bg-white font-bold text-slate-700"
+              className="flex min-h-[52px] items-center justify-center gap-1 rounded-2xl border border-white/10 bg-[#1b1e22] font-bold text-slate-200"
             >
               👁 Xem trước
             </button>
             <button
               onClick={() => void saveContent()}
               disabled={busy}
-              className="flex min-h-[52px] items-center justify-center gap-1 rounded-2xl bg-blue-600 font-bold text-white disabled:opacity-50"
+              className="flex min-h-[52px] items-center justify-center gap-1 rounded-2xl bg-[#1b6fe0] font-bold text-white disabled:opacity-50"
             >
               💾 Lưu nội dung
             </button>
@@ -538,19 +531,19 @@ export function SimpleSectionEditor() {
 
       {/* Slide hiện tại của mục (trước khi tạo mới) */}
       {!drafts && slides.length > 0 && (
-        <div className="mt-3 rounded-2xl bg-white p-4 shadow-sm">
-          <h3 className="mb-2 text-base font-bold text-slate-900">
+        <div className="mt-3 rounded-2xl border border-white/5 bg-[#16181c] p-4">
+          <h3 className="mb-2 text-base font-bold text-white">
             Slide hiện tại ({slides.length})
           </h3>
           <div className="flex gap-2 overflow-x-auto pb-1">
             {slides.map((s, i) => (
               <div key={s.id} className="w-40 shrink-0">
-                <p className="mb-0.5 text-[11px] font-bold text-slate-400">#{i + 1}</p>
+                <p className="mb-0.5 text-[11px] font-bold text-slate-500">#{i + 1}</p>
                 <SlideRenderer slide={s} width={160} aspect={program.aspect_ratio} />
               </div>
             ))}
           </div>
-          <p className="mt-2 text-xs text-slate-400">
+          <p className="mt-2 text-xs text-slate-500">
             Nhập nội dung ở trên rồi bấm “Tự động tạo slide” để làm mới.
           </p>
         </div>

@@ -129,7 +129,7 @@ export function LoiMoi() {
               Bạn đã là thành viên của <strong>{inv?.church?.name}</strong> với vai trò{' '}
               <strong>{inv ? ROLE_LABELS[inv.role] : ''}</strong>.
             </p>
-            <Button className="mt-6" onClick={() => navigate('/dashboard')}>
+            <Button className="mt-6" onClick={() => navigate('/bat-dau')}>
               Vào trang Tổng quan
             </Button>
           </div>

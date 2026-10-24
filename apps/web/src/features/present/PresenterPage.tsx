@@ -412,7 +412,7 @@ export function PresenterPage() {
         <div className="max-w-md w-full bg-white rounded-xl shadow p-6 text-center">
           <h1 className="text-xl font-bold mb-2">Không thể trình chiếu</h1>
           <p className="text-slate-600 mb-4">{denyReason}</p>
-          <Link to="/dashboard" className="inline-block px-4 py-2 rounded-lg bg-blue-600 text-white">
+          <Link to="/bat-dau" className="inline-block px-4 py-2 rounded-lg bg-blue-600 text-white">
             Về trang tổng quan
           </Link>
         </div>
@@ -426,7 +426,7 @@ export function PresenterPage() {
         <div className="max-w-md w-full bg-white rounded-xl shadow p-6 text-center">
           <h1 className="text-xl font-bold mb-2">{program?.title}</h1>
           <p className="text-slate-600 mb-4">Chương trình chưa có slide nào để trình chiếu.</p>
-          <Link to="/dashboard" className="inline-block px-4 py-2 rounded-lg bg-blue-600 text-white">
+          <Link to="/bat-dau" className="inline-block px-4 py-2 rounded-lg bg-blue-600 text-white">
             Về trang tổng quan
           </Link>
         </div>
@@ -439,7 +439,7 @@ export function PresenterPage() {
     return (
       <div className="min-h-screen bg-slate-950 text-white p-6">
         <div className="max-w-2xl mx-auto">
-          <Link to="/dashboard" className="text-slate-400 hover:text-white text-sm">
+          <Link to="/bat-dau" className="text-slate-400 hover:text-white text-sm">
             ← Về trang tổng quan
           </Link>
           <h1 className="text-2xl font-bold mt-4">{program?.title}</h1>

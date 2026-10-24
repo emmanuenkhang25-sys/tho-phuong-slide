@@ -8,7 +8,6 @@ import { DangKy } from '../pages/DangKy';
 import { QuenMatKhau } from '../pages/QuenMatKhau';
 import { DatLaiMatKhau } from '../pages/DatLaiMatKhau';
 import { LoiMoi } from '../pages/LoiMoi';
-import { Dashboard } from '../pages/Dashboard';
 import { HoiThanh } from '../pages/HoiThanh';
 import { CaiDat } from '../pages/CaiDat';
 import { NotFound } from '../pages/NotFound';
@@ -32,7 +31,6 @@ const coreRoutes: RouteObject[] = [
   { path: '/quen-mat-khau', element: <QuenMatKhau /> },
   { path: '/dat-lai-mat-khau', element: <DatLaiMatKhau /> },
   { path: '/loi-moi', element: <LoiMoi /> },
-  { path: '/dashboard', ...inLayout(<Dashboard />) },
   { path: '/hoi-thanh', ...inLayout(<HoiThanh />) },
   { path: '/cai-dat', ...inLayout(<CaiDat />) },
   { path: '*', element: <NotFound /> },

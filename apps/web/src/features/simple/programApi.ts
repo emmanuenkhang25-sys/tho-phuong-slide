@@ -14,6 +14,8 @@ export interface CreateProgramInput {
   /** null = chương trình trống; 'chu-nhat' = từ mẫu Chúa nhật */
   templateId: string | null;
   title?: string;
+  /** YYYY-MM-DD — ngày tổ chức (mặc định: null) */
+  eventDate?: string | null;
 }
 
 /** Tạo chương trình mới (có thể kèm mẫu). Trả về id chương trình. */
@@ -29,6 +31,7 @@ export async function createSimpleProgram(
     id: programId,
     church_id: input.churchId,
     title: input.title ?? (template ? 'Chương trình thờ phượng Chúa nhật' : 'Chương trình mới'),
+    event_date: input.eventDate ?? null,
     created_by: input.userId,
     updated_by: input.userId,
   });

@@ -169,7 +169,7 @@ export function RemotePage() {
   if (phase !== 'da-ket-noi') {
     return (
       <div className="min-h-screen bg-slate-950 text-white p-6 flex flex-col">
-        <Link to="/dashboard" className="text-slate-400 text-sm">
+        <Link to="/bat-dau" className="text-slate-400 text-sm">
           ← Về trang tổng quan
         </Link>
         <div className="flex-1 flex flex-col justify-center max-w-sm w-full mx-auto">

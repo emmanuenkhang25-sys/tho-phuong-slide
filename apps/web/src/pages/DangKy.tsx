@@ -15,7 +15,7 @@ export function DangKy() {
   const [done, setDone] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  if (initialized && user) return <Navigate to="/dashboard" replace />;
+  if (initialized && user) return <Navigate to="/bat-dau" replace />;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -47,7 +47,7 @@ export function DangKy() {
       setDone(true); // Nhắc kiểm tra email xác minh
     } else {
       toast('Đăng ký thành công. Chào mừng bạn!', 'success');
-      navigate('/dashboard', { replace: true });
+      navigate('/bat-dau', { replace: true });
     }
   };
 
