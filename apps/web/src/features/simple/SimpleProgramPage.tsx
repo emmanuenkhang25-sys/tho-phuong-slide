@@ -14,6 +14,7 @@ import { SlideRenderer } from '../editor/components/SlideRenderer';
 import { exportPPTX } from '../export/lib/pptx';
 import { downloadBlob, exportFilename } from '../export/lib/units';
 import type { Program, Section, Slide } from '../../lib/types';
+import { orderProgramSlides } from '../../lib/slideOrder';
 import { uuid } from '../editor/lib/editorUtils';
 import { sectionFormHint } from './sectionForms';
 import { createSimpleProgram, duplicateSimpleSection } from './programApi';
@@ -96,9 +97,10 @@ export function SimpleProgramPage() {
     return (sectionId: string | null) => m.get(sectionId ?? '__none__') ?? 0;
   }, [slides]);
 
+  /** Toàn bộ slide đúng thứ tự chương trình: hết mục trước rồi mới tới mục sau. */
   const orderedSlides = useMemo(
-    () => [...slides].sort((a, b) => a.order_index - b.order_index),
-    [slides],
+    () => orderProgramSlides(sections, slides),
+    [sections, slides],
   );
 
   /** Lưu tên + ngày chương trình. */

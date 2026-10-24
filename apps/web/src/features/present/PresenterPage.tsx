@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import QRCode from 'react-qr-code';
 import { supabase } from '../../lib/supabase';
-import type { PresentSession, Program, Slide } from '../../lib/types';
+import type { PresentSession, Program, Section, Slide } from '../../lib/types';
+import { orderProgramSlides } from '../../lib/slideOrder';
 import { roleRank } from '../../lib/permissions';
 import { useAuth } from '../../stores/auth';
 import { SlideRenderer } from '../editor/components/SlideRenderer';
@@ -111,6 +112,14 @@ export function PresenterPage() {
             'Tài khoản của bạn không có quyền trình chiếu hội thánh này (cần vai trò Người trình chiếu trở lên).',
           );
         }
+        // Thứ tự trình chiếu phải theo thứ tự mục (xem lib/slideOrder) —
+        // sắp riêng theo order_index của slide sẽ làm các mục xen kẽ nhau.
+        const { data: sectionRows, error: secErr } = await supabase
+          .from('sections')
+          .select('*')
+          .eq('program_id', programId)
+          .order('order_index', { ascending: true });
+        if (secErr) throw secErr;
         const { data: slideRows, error: slideErr } = await supabase
           .from('slides')
           .select('*')
@@ -119,7 +128,9 @@ export function PresenterPage() {
         if (slideErr) throw slideErr;
         if (!cancelled) {
           setProgram(p);
-          setSlides((slideRows ?? []) as Slide[]);
+          setSlides(
+            orderProgramSlides((sectionRows ?? []) as Section[], (slideRows ?? []) as Slide[]),
+          );
           setMyRole(member.role as string);
         }
       } catch (e) {

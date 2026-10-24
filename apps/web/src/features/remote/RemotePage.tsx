@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
-import type { PresentSession, Slide } from '../../lib/types';
+import type { PresentSession, Section, Slide } from '../../lib/types';
+import { orderProgramSlides } from '../../lib/slideOrder';
 import { SlideRenderer } from '../editor/components/SlideRenderer';
 import {
   isSessionExpired,
@@ -97,16 +98,27 @@ export function RemotePage() {
         .select('title')
         .eq('id', s.program_id)
         .single();
+      const { data: sectionRows } = await supabase
+        .from('sections')
+        .select('*')
+        .eq('program_id', s.program_id)
+        .order('order_index', { ascending: true });
       const { data: slideRows } = await supabase
         .from('slides')
         .select('*')
         .eq('program_id', s.program_id)
         .order('order_index', { ascending: true });
 
+      // Danh sách slide của remote PHẢI cùng thứ tự với máy chiếu (lib/slideOrder),
+      // nếu không chỉ số slide điều khiển sẽ lệch.
+      const ordered = orderProgramSlides(
+        (sectionRows ?? []) as Section[],
+        ((slideRows ?? []) as Slide[]).filter(Boolean),
+      );
       setSession(s);
       setProgramTitle((prog as { title?: string } | null)?.title ?? 'Chương trình');
-      setSlides(((slideRows ?? []) as Slide[]).filter(Boolean));
-      setIndex(Math.max(0, Math.min(s.current_slide, Math.max(0, (slideRows ?? []).length - 1))));
+      setSlides(ordered);
+      setIndex(Math.max(0, Math.min(s.current_slide, Math.max(0, ordered.length - 1))));
       setLiveState(s.state as 'live' | 'paused' | 'blank');
 
       const ch = supabase.channel(remoteChannelName(s.code));

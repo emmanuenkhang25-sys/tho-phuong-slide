@@ -5,6 +5,7 @@
 import PptxGenJS from 'pptxgenjs';
 import { supabase } from '../../../lib/supabase';
 import type { Program, Section, Slide, SlideObject } from '../../../lib/types';
+import { orderProgramSlides } from '../../../lib/slideOrder';
 import { layoutForRatio, pctToIn, pxToPt, stripHash } from './units';
 
 export interface PptxExportResult {
@@ -117,7 +118,10 @@ export async function exportPPTX(
   sections: Section[],
   slides: Slide[],
 ): Promise<PptxExportResult> {
-  void sections; // giữ đúng signature; thứ tự slide lấy từ order_index
+  // Thứ tự slide phải theo thứ tự MỤC rồi mới tới thứ tự slide trong mục
+  // (order_index của slide chỉ có nghĩa trong từng mục — sắp riêng nó sẽ
+  // làm các mục xen kẽ nhau).
+  const ordered = orderProgramSlides(sections, slides);
   const warnings: string[] = [];
   const pptx = new PptxGenJS();
   pptx.title = program.title || 'Chương trình thờ phượng';
@@ -127,7 +131,6 @@ export async function exportPPTX(
   pptx.defineLayout({ name: layout.name, width: layout.width, height: layout.height });
   pptx.layout = layout.name;
 
-  const ordered = [...slides].sort((a, b) => a.order_index - b.order_index);
   let slideNo = 0;
   for (const data of ordered) {
     slideNo += 1;
