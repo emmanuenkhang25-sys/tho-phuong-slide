@@ -1,5 +1,21 @@
 // Helpers thuần cho export — không phụ thuộc DOM, test được bằng node.
 
+/**
+ * MIME chuẩn của PowerPoint (.pptx).
+ * PptxGenJS trả blob dạng `application/zip` — Android vì thế hiểu nhầm file
+ * .pptx thành file nén và đòi "Giải nén" thay vì mở bằng app PowerPoint.
+ */
+export const PPTX_MIME =
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+
+/**
+ * Gói lại blob thành file PowerPoint đúng MIME (nội dung byte không đổi).
+ * Blob đã đúng MIME thì giữ nguyên.
+ */
+export function asPptxBlob(raw: Blob): Blob {
+  return raw.type === PPTX_MIME ? raw : new Blob([raw], { type: PPTX_MIME });
+}
+
 export interface SlideLayout {
   name: string;
   width: number; // inch

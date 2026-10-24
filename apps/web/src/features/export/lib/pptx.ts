@@ -6,7 +6,7 @@ import PptxGenJS from 'pptxgenjs';
 import { supabase } from '../../../lib/supabase';
 import type { Program, Section, Slide, SlideObject } from '../../../lib/types';
 import { orderProgramSlides } from '../../../lib/slideOrder';
-import { layoutForRatio, pctToIn, pxToPt, stripHash } from './units';
+import { asPptxBlob, layoutForRatio, pctToIn, pxToPt, stripHash } from './units';
 
 export interface PptxExportResult {
   blob: Blob;
@@ -177,7 +177,9 @@ export async function exportPPTX(
     }
   }
 
-  const blob = (await pptx.write({ outputType: 'blob' })) as unknown as Blob;
+  // PptxGenJS trả blob dạng application/zip — gói lại đúng MIME PowerPoint
+  // để Android mở bằng app PowerPoint thay vì hiểu nhầm thành file nén.
+  const blob = asPptxBlob((await pptx.write({ outputType: 'blob' })) as unknown as Blob);
   // Gộp warning trùng lặp để UI gọn.
   return { blob, warnings: [...new Set(warnings)] };
 }
