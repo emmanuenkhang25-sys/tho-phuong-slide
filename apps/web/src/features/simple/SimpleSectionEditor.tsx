@@ -3,7 +3,7 @@
 // SimpleSectionEditor — sửa MỘT mục: form đúng loại nội dung, dán chữ →
 // tự tạo slide → xem trước → lưu. Không cần biết gì về slide thủ công.
 // ============================================================================
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useToast } from '../../components/ui';
@@ -18,6 +18,7 @@ import {
   type SlideDraft,
 } from '../editor/lib/split';
 import type {
+  AspectRatio,
   Program,
   Section,
   Slide,
@@ -142,6 +143,132 @@ function TextColorRow({
   );
 }
 
+/** Slide xem trước từ bản nháp (đặt ngoài component để memo dùng chung được). */
+function toPreviewSlide(d: SlideDraft): Slide {
+  return { id: uuid(), content: { objects: d.objects }, background: d.background } as Slide;
+}
+
+/**
+ * Một thẻ slide nháp — memo để chỉ vẽ lại khi ĐÚNG slide này đổi. Trước đây
+ * đổi cỡ/màu/kéo một slide là cả 21 thẻ vẽ lại theo nên rất giật.
+ */
+const DraftCard = memo(function DraftCard({
+  d,
+  i,
+  scale,
+  editing,
+  aspect,
+  onPatchObject,
+  onPatchBody,
+  onFontScale,
+  onEditText,
+  onToggleEdit,
+  onDelete,
+}: {
+  d: SlideDraft;
+  i: number;
+  scale: number;
+  editing: boolean;
+  aspect: AspectRatio;
+  onPatchObject: (idx: number, objId: string, patch: Partial<SlideObject>) => void;
+  onPatchBody: (idx: number, patch: Partial<SlideObject>) => void;
+  onFontScale: (idx: number, scale: number) => void;
+  onEditText: (idx: number, value: string) => void;
+  onToggleEdit: (idx: number) => void;
+  onDelete: (idx: number) => void;
+}) {
+  const preview = useMemo(() => toPreviewSlide(d), [d]);
+  const textDrag = useMemo(
+    () => ({ onTextMove: (objId: string, patch: Partial<SlideObject>) => onPatchObject(i, objId, patch) }),
+    [onPatchObject, i],
+  );
+  const colorPatch = useMemo(
+    () => (patch: Partial<SlideObject>) => onPatchBody(i, patch),
+    [onPatchBody, i],
+  );
+  const body = bodyObjOf(d.objects);
+  const editValue = (() => {
+    let bi = -1;
+    let best = -1;
+    d.objects.forEach((o, j) => {
+      if (o.type === 'text' && (o.fontSize ?? 0) > best) {
+        best = o.fontSize ?? 0;
+        bi = j;
+      }
+    });
+    return bi >= 0 ? (d.objects[bi].text ?? '') : '';
+  })();
+  return (
+    <div className="rounded-xl border border-white/10 p-2">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <p className="text-xs font-bold text-slate-500">Slide {i + 1}</p>
+        <div className="flex flex-wrap items-center justify-end gap-1">
+          <div className="flex items-center gap-1" role="group" aria-label={`Cỡ chữ slide ${i + 1}`}>
+            {(
+              [
+                ['Nhỏ', 0.8],
+                ['Vừa', 1],
+                ['To', 1.25],
+              ] as const
+            ).map(([label, s]) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => onFontScale(i, s)}
+                aria-pressed={scale === s}
+                className={
+                  'min-h-[36px] rounded-lg border px-2.5 text-xs font-bold ' +
+                  (scale === s
+                    ? 'border-violet-500 bg-violet-500/20 text-violet-200'
+                    : 'border-white/10 text-slate-400')
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => onToggleEdit(i)}
+            aria-pressed={editing}
+            aria-label={`Sửa chữ slide ${i + 1}`}
+            className={
+              'min-h-[36px] rounded-lg border px-2.5 text-xs font-bold ' +
+              (editing
+                ? 'border-violet-500 bg-violet-500/20 text-violet-200'
+                : 'border-white/10 text-slate-400')
+            }
+          >
+            {editing ? '✓ Xong' : '✏️ Sửa'}
+          </button>
+          <button
+            type="button"
+            onClick={() => onDelete(i)}
+            aria-label={`Xóa slide ${i + 1}`}
+            className="min-h-[36px] rounded-lg border border-red-900/50 px-2.5 text-xs font-bold text-red-400"
+          >
+            🗑 Xóa
+          </button>
+        </div>
+      </div>
+      {editing ? (
+        <textarea
+          value={editValue}
+          onChange={(e) => onEditText(i, e.target.value)}
+          rows={4}
+          aria-label={`Nội dung slide ${i + 1}`}
+          className="min-h-[120px] w-full rounded-lg border border-white/10 bg-[#0e0f11] px-2 py-1 text-base text-slate-100"
+        />
+      ) : (
+        <div>
+          <SlideRenderer slide={preview} width={300} aspect={aspect} textDrag={textDrag} />
+          {body && <TextColorRow body={body} onPatchBody={colorPatch} />}
+        </div>
+      )}
+    </div>
+  );
+});
+
 export function SimpleSectionEditor() {
   const { id: programId, sectionId } = useParams<{ id: string; sectionId: string }>();
   const { toast } = useToast();
@@ -186,8 +313,13 @@ export function SimpleSectionEditor() {
     if (!programId || !sectionId) return;
     const load = async () => {
       setLoading(true);
-      const { data: p } = await supabase.from('programs').select('*').eq('id', programId).single();
-      const { data: s } = await supabase.from('sections').select('*').eq('id', sectionId).single();
+      // Ba câu hỏi độc lập nhau (id đã có sẵn từ URL) — gọi song song thay
+      // vì nối tiếp để mở mục nhanh hơn.
+      const [{ data: p }, { data: s }, { data: sls }] = await Promise.all([
+        supabase.from('programs').select('*').eq('id', programId).single(),
+        supabase.from('sections').select('*').eq('id', sectionId).single(),
+        supabase.from('slides').select('*').eq('section_id', sectionId).order('order_index'),
+      ]);
       if (!p || !s) {
         toast('Không tìm thấy mục.', 'error');
         navigate(`/p/${programId}`, { replace: true });
@@ -198,11 +330,6 @@ export function SimpleSectionEditor() {
       setProgram(prog);
       setSection(sec);
       setSecTitle(sec.title);
-      const { data: sls } = await supabase
-        .from('slides')
-        .select('*')
-        .eq('section_id', sectionId)
-        .order('order_index');
       const ordered = ((sls ?? []) as Slide[]).sort((a, b) => a.order_index - b.order_index);
       setSlides(ordered);
       // Dựng lại nội dung nguồn từ các slide hiện có (mục có thể chưa có slide nào)
@@ -332,7 +459,7 @@ export function SimpleSectionEditor() {
   };
 
   /** Đổi cỡ chữ của RIÊNG slide thứ idx (Nhỏ 0.8 / Vừa 1 / To 1.25) — tính lại từ cỡ gốc. */
-  const setDraftFontScale = (idx: number, scale: number) => {
+  const setDraftFontScale = useCallback((idx: number, scale: number) => {
     const bases = basesRef.current[idx];
     if (!bases) return;
     setDraftScales((prev) => prev.map((s, i) => (i === idx ? scale : s)));
@@ -350,7 +477,7 @@ export function SimpleSectionEditor() {
         };
       });
     });
-  };
+  }, []);
 
   /** Tải ảnh lên làm nền cho toàn bộ slide của mục. */
   const onPickBackground = async (file: File | undefined) => {
@@ -365,10 +492,17 @@ export function SimpleSectionEditor() {
         toast('Đã đổi ảnh nền cho bản nháp — bấm “Lưu nội dung” để lưu.', 'success');
       } else if (slides.length > 0) {
         const ordered = [...slides].sort((a, b) => a.order_index - b.order_index);
-        for (const s of ordered) {
-          const { error } = await supabase.from('slides').update({ background: bg }).eq('id', s.id);
-          if (error) throw new Error(`Đổi nền slide lỗi: ${error.message}`);
-        }
+        await Promise.all(
+          ordered.map((s) =>
+            supabase
+              .from('slides')
+              .update({ background: bg })
+              .eq('id', s.id)
+              .then(({ error }) => {
+                if (error) throw new Error(`Đổi nền slide lỗi: ${error.message}`);
+              }),
+          ),
+        );
         setSlides(ordered.map((s) => ({ ...s, background: bg })));
         toast(`Đã đổi ảnh nền cho ${ordered.length} slide.`, 'success');
       } else {
@@ -427,13 +561,17 @@ export function SimpleSectionEditor() {
       setBgBusy(true);
       try {
         const ordered = [...slides].sort((a, b) => a.order_index - b.order_index);
-        for (const s of ordered) {
-          const { error } = await supabase
-            .from('slides')
-            .update({ background: defaultSectionBg })
-            .eq('id', s.id);
-          if (error) throw new Error(`Đổi nền slide lỗi: ${error.message}`);
-        }
+        await Promise.all(
+          ordered.map((s) =>
+            supabase
+              .from('slides')
+              .update({ background: defaultSectionBg })
+              .eq('id', s.id)
+              .then(({ error }) => {
+                if (error) throw new Error(`Đổi nền slide lỗi: ${error.message}`);
+              }),
+          ),
+        );
         setSlides(ordered.map((s) => ({ ...s, background: defaultSectionBg })));
         toast('Đã về nền mặc định.', 'success');
       } catch (e) {
@@ -445,7 +583,7 @@ export function SimpleSectionEditor() {
   };
 
   /** Sửa chữ của slide thứ i trong bản xem trước (chỉ sửa object thân bài). */
-  const editDraftText = (idx: number, value: string) => {
+  const editDraftText = useCallback((idx: number, value: string) => {
     setDrafts((prev) => {
       if (!prev) return prev;
       return prev.map((d, i) => {
@@ -462,10 +600,10 @@ export function SimpleSectionEditor() {
         return { ...d, objects: d.objects.map((o, j) => (j === bi ? { ...o, text: value } : o)) };
       });
     });
-  };
+  }, []);
 
   /** Đổi thuộc tính của object thân bài trong bản nháp (dùng cho kéo-thả, đổi màu). */
-  const patchDraftBody = (idx: number, patch: Partial<SlideObject>) => {
+  const patchDraftBody = useCallback((idx: number, patch: Partial<SlideObject>) => {
     setDrafts((prev) => {
       if (!prev) return prev;
       return prev.map((d, i) => {
@@ -475,10 +613,10 @@ export function SimpleSectionEditor() {
         return { ...d, objects: d.objects.map((o) => (o.id === body.id ? { ...o, ...patch } : o)) };
       });
     });
-  };
+  }, []);
 
   /** Đổi thuộc tính của một object bất kỳ trong bản nháp (dùng cho kéo chữ trực tiếp). */
-  const patchDraftObject = (idx: number, objId: string, patch: Partial<SlideObject>) => {
+  const patchDraftObject = useCallback((idx: number, objId: string, patch: Partial<SlideObject>) => {
     setDrafts((prev) => {
       if (!prev) return prev;
       return prev.map((d, i) => {
@@ -486,7 +624,26 @@ export function SimpleSectionEditor() {
         return { ...d, objects: d.objects.map((o) => (o.id === objId ? { ...o, ...patch } : o)) };
       });
     });
-  };
+  }, []);
+
+  /** Bật/tắt sửa chữ tại chỗ của một slide. */
+  const toggleEdit = useCallback((idx: number) => {
+    setEditingIdx((cur) => (cur === idx ? null : idx));
+  }, []);
+
+  /**
+   * Xóa một slide khỏi bản nháp (slide thừa do tạo nhầm). Chỉ xóa ở bản
+   * nháp — muốn xóa khỏi chương trình thì bấm “Lưu nội dung” sau đó (lưu
+   * vốn đã tự xóa các slide thừa cuối). Đồng bộ cả cỡ chữ gốc và thang cỡ
+   * theo chỉ số mới để các slide còn lại không bị lệch cỡ.
+   */
+  const deleteDraft = useCallback((idx: number) => {
+    if (!window.confirm(`Xóa slide ${idx + 1} khỏi bản nháp?`)) return;
+    basesRef.current = basesRef.current.filter((_, i) => i !== idx);
+    setDraftScales((prev) => prev.filter((_, i) => i !== idx));
+    setDrafts((prev) => (prev ? prev.filter((_, i) => i !== idx) : prev));
+    setEditingIdx(null);
+  }, []);
 
   /** Lưu: cập nhật slide cũ theo vị trí, thêm mới nếu thừa, xóa bớt nếu dư. */
   const saveContent = async () => {
@@ -499,16 +656,22 @@ export function SimpleSectionEditor() {
     try {
       const ordered = [...slides].sort((a, b) => a.order_index - b.order_index);
       const n = Math.min(ordered.length, drafts.length);
-      for (let i = 0; i < n; i++) {
-        const { error } = await supabase
-          .from('slides')
-          .update({
-            content: { objects: drafts[i].objects },
-            background: drafts[i].background,
-          })
-          .eq('id', ordered[i].id);
-        if (error) throw new Error(`Cập nhật slide ${i + 1} lỗi: ${error.message}`);
-      }
+      // Cập nhật TẤT CẢ slide cùng lúc thay vì từng slide nối tiếp nhau —
+      // trước đây lưu 21 slide là 21 lần chờ mạng liên tiếp nên rất lag.
+      await Promise.all(
+        ordered.slice(0, n).map((s, i) =>
+          supabase
+            .from('slides')
+            .update({
+              content: { objects: drafts[i].objects },
+              background: drafts[i].background,
+            })
+            .eq('id', s.id)
+            .then(({ error }) => {
+              if (error) throw new Error(`Cập nhật slide ${i + 1} lỗi: ${error.message}`);
+            }),
+        ),
+      );
       if (drafts.length > ordered.length) {
         const extras = drafts.slice(ordered.length).map((d, k) => ({
           id: uuid(),
@@ -584,9 +747,6 @@ export function SimpleSectionEditor() {
       setBusy(false);
     }
   };
-
-  const toPreviewSlide = (d: SlideDraft): Slide =>
-    ({ id: uuid(), content: { objects: d.objects }, background: d.background }) as Slide;
 
   if (loading) {
     return (
@@ -810,91 +970,20 @@ export function SimpleSectionEditor() {
           </h3>
           <div className="flex flex-col gap-3">
             {drafts.map((d, i) => (
-              <div key={i} className="rounded-xl border border-white/10 p-2">
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <p className="text-xs font-bold text-slate-500">Slide {i + 1}</p>
-                  <div className="flex items-center gap-1">
-                    <div
-                      className="flex items-center gap-1"
-                      role="group"
-                      aria-label={`Cỡ chữ slide ${i + 1}`}
-                    >
-                      {(
-                        [
-                          ['Nhỏ', 0.8],
-                          ['Vừa', 1],
-                          ['To', 1.25],
-                        ] as const
-                      ).map(([label, scale]) => (
-                        <button
-                          key={label}
-                          type="button"
-                          onClick={() => setDraftFontScale(i, scale)}
-                          aria-pressed={(draftScales[i] ?? 1) === scale}
-                          className={
-                            'min-h-[36px] rounded-lg border px-2.5 text-xs font-bold ' +
-                            ((draftScales[i] ?? 1) === scale
-                              ? 'border-violet-500 bg-violet-500/20 text-violet-200'
-                              : 'border-white/10 text-slate-400')
-                          }
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setEditingIdx(editingIdx === i ? null : i)}
-                      aria-pressed={editingIdx === i}
-                      aria-label={`Sửa chữ slide ${i + 1}`}
-                      className={
-                        'min-h-[36px] rounded-lg border px-2.5 text-xs font-bold ' +
-                        (editingIdx === i
-                          ? 'border-violet-500 bg-violet-500/20 text-violet-200'
-                          : 'border-white/10 text-slate-400')
-                      }
-                    >
-                      {editingIdx === i ? '✓ Xong' : '✏️ Sửa'}
-                    </button>
-                  </div>
-                </div>
-                {editingIdx === i ? (
-                  <textarea
-                    value={
-                      (() => {
-                        let bi = -1;
-                        let best = -1;
-                        d.objects.forEach((o, j) => {
-                          if (o.type === 'text' && (o.fontSize ?? 0) > best) {
-                            best = o.fontSize ?? 0;
-                            bi = j;
-                          }
-                        });
-                        return bi >= 0 ? (d.objects[bi].text ?? '') : '';
-                      })()
-                    }
-                    onChange={(e) => editDraftText(i, e.target.value)}
-                    rows={4}
-                    aria-label={`Nội dung slide ${i + 1}`}
-                    className="min-h-[120px] w-full rounded-lg border border-white/10 bg-[#0e0f11] px-2 py-1 text-base text-slate-100"
-                  />
-                ) : (
-                  <div>
-                    <SlideRenderer
-                      slide={toPreviewSlide(d)}
-                      width={300}
-                      aspect={program.aspect_ratio}
-                      textDrag={{ onTextMove: (objId, patch) => patchDraftObject(i, objId, patch) }}
-                    />
-                    {bodyObjOf(d.objects) && (
-                      <TextColorRow
-                        body={bodyObjOf(d.objects) as SlideObject}
-                        onPatchBody={(patch) => patchDraftBody(i, patch)}
-                      />
-                    )}
-                  </div>
-                )}
-              </div>
+              <DraftCard
+                key={i}
+                d={d}
+                i={i}
+                scale={draftScales[i] ?? 1}
+                editing={editingIdx === i}
+                aspect={program.aspect_ratio}
+                onPatchObject={patchDraftObject}
+                onPatchBody={patchDraftBody}
+                onFontScale={setDraftFontScale}
+                onEditText={editDraftText}
+                onToggleEdit={toggleEdit}
+                onDelete={deleteDraft}
+              />
             ))}
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2">

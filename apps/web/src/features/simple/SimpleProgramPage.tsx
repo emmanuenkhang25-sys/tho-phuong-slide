@@ -11,7 +11,6 @@ import { ensureChurchLoaded, useChurch } from '../../stores/church';
 import { Modal, useToast } from '../../components/ui';
 import { SECTION_KINDS, sectionKindLabel } from '../editor/lib/editorUtils';
 import { SlideRenderer } from '../editor/components/SlideRenderer';
-import { exportPPTX } from '../export/lib/pptx';
 import { downloadBlob, exportFilename } from '../export/lib/units';
 import type { Program, Section, Slide } from '../../lib/types';
 import { orderProgramSlides } from '../../lib/slideOrder';
@@ -71,17 +70,12 @@ export function SimpleProgramPage() {
       setProgram(prog);
       setTitle(prog.title);
       setEventDate(prog.event_date ?? '');
-      const { data: secs } = await supabase
-        .from('sections')
-        .select('*')
-        .eq('program_id', id)
-        .order('order_index');
+      // Mục và slide độc lập nhau — tải song song thay vì nối tiếp.
+      const [{ data: secs }, { data: sls }] = await Promise.all([
+        supabase.from('sections').select('*').eq('program_id', id).order('order_index'),
+        supabase.from('slides').select('*').eq('program_id', id).order('order_index'),
+      ]);
       setSections(((secs ?? []) as Section[]).sort((a, b) => a.order_index - b.order_index));
-      const { data: sls } = await supabase
-        .from('slides')
-        .select('*')
-        .eq('program_id', id)
-        .order('order_index');
       setSlides(((sls ?? []) as Slide[]).sort((a, b) => a.order_index - b.order_index));
       setLoading(false);
     };
@@ -278,6 +272,9 @@ export function SimpleProgramPage() {
     }
     setExporting(true);
     try {
+      // Tải code xuất PPTX khi bấm nút (thay vì kèm sẵn trong gói chính) —
+      // gói chính nhẹ đi, mở app nhanh hơn; lần xuất đầu chờ tải thêm 1 lúc.
+      const { exportPPTX } = await import('../export/lib/pptx');
       const result = await exportPPTX(program, sections, slides);
       downloadBlob(result.blob, exportFilename(program.title, 'pptx'));
       toast(

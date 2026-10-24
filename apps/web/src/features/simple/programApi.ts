@@ -101,13 +101,19 @@ export async function duplicateSimpleSection(
     .eq('program_id', programId)
     .gt('order_index', section.order_index)
     .order('order_index');
-  for (const s of (later ?? []) as { id: string; order_index: number }[]) {
-    const { error } = await supabase
-      .from('sections')
-      .update({ order_index: s.order_index + 1 })
-      .eq('id', s.id);
-    if (error) throw new Error(`Dồn thứ tự mục lỗi: ${error.message}`);
-  }
+  // Các mục khác nhau nên dồn song song thay vì từng mục nối tiếp (trước
+  // đây nhân bản 1 mục đầu chương trình là chờ cả chục lần gọi mạng).
+  await Promise.all(
+    ((later ?? []) as { id: string; order_index: number }[]).map((s) =>
+      supabase
+        .from('sections')
+        .update({ order_index: s.order_index + 1 })
+        .eq('id', s.id)
+        .then(({ error }) => {
+          if (error) throw new Error(`Dồn thứ tự mục lỗi: ${error.message}`);
+        }),
+    ),
+  );
   const { error: sErr } = await supabase.from('sections').insert({
     id: newSectionId,
     program_id: programId,

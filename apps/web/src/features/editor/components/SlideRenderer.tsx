@@ -16,7 +16,7 @@
 // trực tiếp bằng tay (chạm vào chữ rồi di chuyển) — chỉ màn sửa mục dùng;
 // các nơi khác không truyền prop này nên chữ không kéo được.
 // ============================================================
-import { useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { memo, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import type { AspectRatio, Slide, SlideBackground, SlideObject } from '../../../lib/types';
 
 /** Kéo chữ trực tiếp trong slide nháp: ghi vị trí + kích thước mới (%, đã ôm sát chữ). */
@@ -99,8 +99,18 @@ function ObjectView({
   /** Báo tâm khung chữ đang kéo (null = không kéo) để vẽ đường gióng giữa slide. */
   onDragGuide?: (g: { cx: number; cy: number } | null) => void;
 }) {
-  // Trạng thái kéo của riêng object này (mỗi object một instance).
-  const dragRef = useRef<{ grabX: number; grabY: number; w: number; h: number } | null>(null);
+  // Trạng thái kéo của riêng object này (mỗi object một instance). Chỉ dùng
+  // cho tính toán — trong lúc kéo KHÔNG qua React state: vị trí đổi trực
+  // tiếp trên DOM để không re-render cả trang mỗi lần di chuột; thả tay mới
+  // commit một lần qua onTextMove (xem onPointerEnd).
+  const dragRef = useRef<{
+    grabX: number;
+    grabY: number;
+    w: number;
+    h: number;
+    lastX: number;
+    lastY: number;
+  } | null>(null);
 
   const box: CSSProperties = {
     position: 'absolute',
@@ -183,7 +193,12 @@ function ObjectView({
         /* không bắt được pointer thì vẫn kéo chừng nào ngón tay còn trên chữ */
       }
       // Giữ nguyên khoảng cách ngón tay — mép khung sát chữ để chữ không nhảy.
-      dragRef.current = { grabX: px - nx, grabY: py - m.y, w: nw, h: m.h };
+      // Đổi trực tiếp trên DOM (không qua state) để kéo mượt, không re-render.
+      el.style.left = `${nx}%`;
+      el.style.top = `${m.y}%`;
+      el.style.width = `${nw}%`;
+      el.style.height = `${m.h}%`;
+      dragRef.current = { grabX: px - nx, grabY: py - m.y, w: nw, h: m.h, lastX: nx, lastY: m.y };
       onDragGuide?.({ cx: nx + nw / 2, cy: m.y + m.h / 2 });
     };
     const onPointerMove = (e: ReactPointerEvent) => {
@@ -207,12 +222,28 @@ function ObjectView({
         ny = 50 - st.h / 2;
         cy = 50;
       }
-      textDrag.onTextMove(obj.id, { x: round1(nx), y: round1(ny), w: round1(st.w), h: round1(st.h) });
+      // Chỉ đổi DOM, không setState — thả tay mới lưu (onPointerEnd).
+      const el = e.currentTarget as HTMLElement;
+      el.style.left = `${nx}%`;
+      el.style.top = `${ny}%`;
+      st.lastX = nx;
+      st.lastY = ny;
       onDragGuide?.({ cx, cy });
     };
     const onPointerEnd = () => {
+      const st = dragRef.current;
       dragRef.current = null;
       onDragGuide?.(null);
+      // Commit một lần duy nhất — đây mới là lần re-render duy nhất của cả
+      // lần kéo (trước đây mỗi lần di chuột đều re-render toàn bộ trang).
+      if (st && textDrag) {
+        textDrag.onTextMove(obj.id, {
+          x: round1(st.lastX),
+          y: round1(st.lastY),
+          w: round1(st.w),
+          h: round1(st.h),
+        });
+      }
     };
 
     return (
@@ -315,7 +346,7 @@ function ObjectView({
   );
 }
 
-export function SlideRenderer({
+function SlideRendererInner({
   slide,
   width,
   aspect = '16:9',
@@ -326,8 +357,26 @@ export function SlideRenderer({
   const scale = width / BASE_W;
   const objects = [...(slide.content?.objects ?? [])].sort((a, b) => (a.z ?? 0) - (b.z ?? 0));
   const bg = slide.background;
-  // Tâm khung chữ đang kéo (null = không kéo) — để vẽ đường gióng giữa slide.
-  const [guide, setGuide] = useState<{ cx: number; cy: number } | null>(null);
+  // Đường gióng đổi trực tiếp trên DOM (không qua state) để kéo không
+  // re-render: hai div luôn nằm sẵn trong slide, ẩn/hiện bằng style.
+  const guideVRef = useRef<HTMLDivElement>(null);
+  const guideHRef = useRef<HTMLDivElement>(null);
+  const setGuideDom = (g: { cx: number; cy: number } | null) => {
+    const v = guideVRef.current;
+    const h = guideHRef.current;
+    if (!v || !h) return;
+    if (!g) {
+      v.style.display = 'none';
+      h.style.display = 'none';
+      return;
+    }
+    v.style.display = 'block';
+    h.style.display = 'block';
+    v.style.borderLeft =
+      Math.abs(g.cx - 50) < 0.6 ? '2px solid #f472b6' : '1px dashed rgba(255,255,255,0.55)';
+    h.style.borderTop =
+      Math.abs(g.cy - 50) < 0.6 ? '2px solid #f472b6' : '1px dashed rgba(255,255,255,0.55)';
+  };
 
   return (
     <div
@@ -347,7 +396,7 @@ export function SlideRenderer({
           scale={scale}
           highlightChorus={highlightChorus}
           textDrag={textDrag}
-          onDragGuide={setGuide}
+          onDragGuide={setGuideDom}
         />
       ))}
       {bg?.overlayOpacity ? (
@@ -363,36 +412,40 @@ export function SlideRenderer({
       ) : null}
       {/* Đường gióng giữa slide khi đang kéo chữ: nét đứt = chưa giữa, nét
           liền hồng = đã hút vào chính giữa (cân trên-dưới, trái-phải). */}
-      {guide && (
-        <>
-          <div
-            data-tps-guide="v"
-            style={{
-              position: 'absolute',
-              left: '50%',
-              top: 0,
-              bottom: 0,
-              borderLeft:
-                Math.abs(guide.cx - 50) < 0.6 ? '2px solid #f472b6' : '1px dashed rgba(255,255,255,0.55)',
-              pointerEvents: 'none',
-              zIndex: 999,
-            }}
-          />
-          <div
-            data-tps-guide="h"
-            style={{
-              position: 'absolute',
-              top: '50%',
-              left: 0,
-              right: 0,
-              borderTop:
-                Math.abs(guide.cy - 50) < 0.6 ? '2px solid #f472b6' : '1px dashed rgba(255,255,255,0.55)',
-              pointerEvents: 'none',
-              zIndex: 999,
-            }}
-          />
-        </>
-      )}
+      <div
+        ref={guideVRef}
+        data-tps-guide="v"
+        style={{
+          position: 'absolute',
+          left: '50%',
+          top: 0,
+          bottom: 0,
+          display: 'none',
+          borderLeft: '1px dashed rgba(255,255,255,0.55)',
+          pointerEvents: 'none',
+          zIndex: 999,
+        }}
+      />
+      <div
+        ref={guideHRef}
+        data-tps-guide="h"
+        style={{
+          position: 'absolute',
+          top: '50%',
+          left: 0,
+          right: 0,
+          display: 'none',
+          borderTop: '1px dashed rgba(255,255,255,0.55)',
+          pointerEvents: 'none',
+          zIndex: 999,
+        }}
+      />
     </div>
   );
 }
+
+/**
+ * Memo: một slide chỉ vẽ lại khi đúng slide đó đổi (props đổi). Nhờ vậy đổi
+ * cỡ/màu/kéo một slide không bắt cả 21 slide vẽ lại theo.
+ */
+export const SlideRenderer = memo(SlideRendererInner);
