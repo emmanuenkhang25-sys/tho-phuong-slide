@@ -140,11 +140,16 @@ export function Modal({
   wide?: boolean;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  // Giữ onClose mới nhất trong ref để effect chỉ chạy khi `open` đổi —
+  // tránh giật focus khỏi ô nhập mỗi lần component cha re-render
+  // (VD: onClose={() => setShow(false)} tạo hàm mới mỗi render).
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') onCloseRef.current();
     };
     document.addEventListener('keydown', onKey);
     // Focus vào dialog khi mở (accessible)
@@ -154,7 +159,7 @@ export function Modal({
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = '';
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
   return (
