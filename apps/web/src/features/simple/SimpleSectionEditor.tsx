@@ -3,7 +3,7 @@
 // SimpleSectionEditor — sửa MỘT mục: form đúng loại nội dung, dán chữ →
 // tự tạo slide → xem trước → lưu. Không cần biết gì về slide thủ công.
 // ============================================================================
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useToast } from '../../components/ui';
@@ -18,7 +18,6 @@ import {
   type SlideDraft,
 } from '../editor/lib/split';
 import type {
-  AspectRatio,
   Program,
   Section,
   Slide,
@@ -106,117 +105,39 @@ const labelCls = 'mb-1 block text-sm font-bold text-slate-300';
 /** Bảng màu chữ nhanh cho slide (kèm ô chọn màu tùy ý). */
 const TEXT_COLORS = ['#ffffff', '#fde047', '#f87171', '#fb923c', '#60a5fa', '#4ade80', '#000000'];
 
-/**
- * Bản xem trước slide ở chế độ sắp chữ: kéo-thả chữ đến vị trí mong muốn
- * (kéo ngay trên slide, tọa độ % nên khớp cả khi trình chiếu) và đổi màu chữ.
- */
-function DraggableSlidePreview({
-  slide,
+/** Hàng chọn màu chữ, luôn hiện dưới slide nháp có chữ. */
+function TextColorRow({
   body,
-  aspect,
   onPatchBody,
 }: {
-  slide: Slide;
   body: SlideObject;
-  aspect: AspectRatio;
   onPatchBody: (patch: Partial<SlideObject>) => void;
 }) {
-  const dragRef = useRef<{
-    startX: number;
-    startY: number;
-    origX: number;
-    origY: number;
-    w: number;
-    h: number;
-    rectW: number;
-    rectH: number;
-  } | null>(null);
-
-  const onDragStart = (e: ReactPointerEvent) => {
-    const boxEl = (e.currentTarget as HTMLElement).parentElement;
-    const rect = boxEl?.getBoundingClientRect();
-    if (!rect) return;
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    dragRef.current = {
-      startX: e.clientX,
-      startY: e.clientY,
-      origX: body.x,
-      origY: body.y,
-      w: body.w,
-      h: body.h,
-      rectW: rect.width,
-      rectH: rect.height,
-    };
-  };
-  const onDragMove = (e: ReactPointerEvent) => {
-    const st = dragRef.current;
-    if (!st) return;
-    const nx = Math.min(
-      Math.max(0, st.origX + ((e.clientX - st.startX) / st.rectW) * 100),
-      Math.max(0, 100 - st.w),
-    );
-    const ny = Math.min(
-      Math.max(0, st.origY + ((e.clientY - st.startY) / st.rectH) * 100),
-      Math.max(0, 100 - st.h),
-    );
-    onPatchBody({ x: Math.round(nx * 10) / 10, y: Math.round(ny * 10) / 10 });
-  };
-  const onDragEnd = () => {
-    dragRef.current = null;
-  };
-
   const colorValue = /^#[0-9a-fA-F]{6}$/.test(body.color ?? '') ? (body.color as string) : '#ffffff';
-
   return (
-    <div>
-      <div className="relative w-fit">
-        <SlideRenderer slide={slide} width={300} aspect={aspect} />
-        <div
-          role="button"
-          aria-label="Kéo để di chuyển chữ"
-          onPointerDown={onDragStart}
-          onPointerMove={onDragMove}
-          onPointerUp={onDragEnd}
-          onPointerCancel={onDragEnd}
-          className="absolute z-10 rounded border-2 border-dashed border-violet-400 bg-violet-500/10"
-          style={{
-            left: `${body.x}%`,
-            top: `${body.y}%`,
-            width: `${body.w}%`,
-            height: `${body.h}%`,
-            touchAction: 'none',
-            cursor: 'grab',
-          }}
-        >
-          <span className="absolute -top-6 left-0 whitespace-nowrap rounded bg-violet-500 px-1.5 py-0.5 text-[11px] font-bold text-white">
-            ✋ Kéo để di chuyển
-          </span>
-        </div>
-      </div>
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <span className="text-xs font-bold text-slate-400">Màu chữ:</span>
-        {TEXT_COLORS.map((c) => (
-          <button
-            key={c}
-            type="button"
-            onClick={() => onPatchBody({ color: c })}
-            aria-label={`Đổi màu chữ ${c}`}
-            aria-pressed={body.color === c}
-            className={
-              'h-9 w-9 rounded-full border-2 ' +
-              (body.color === c ? 'border-violet-400' : 'border-white/20')
-            }
-            style={{ backgroundColor: c }}
-          />
-        ))}
-        <input
-          type="color"
-          value={colorValue}
-          onChange={(e) => onPatchBody({ color: e.target.value })}
-          aria-label="Chọn màu chữ tùy ý"
-          className="h-9 w-9 cursor-pointer rounded-full border-2 border-white/20 bg-transparent p-0.5"
+    <div className="mt-2 flex flex-wrap items-center gap-2">
+      <span className="text-xs font-bold text-slate-400">Màu chữ:</span>
+      {TEXT_COLORS.map((c) => (
+        <button
+          key={c}
+          type="button"
+          onClick={() => onPatchBody({ color: c })}
+          aria-label={`Đổi màu chữ ${c}`}
+          aria-pressed={body.color === c}
+          className={
+            'h-9 w-9 rounded-full border-2 ' +
+            (body.color === c ? 'border-violet-400' : 'border-white/20')
+          }
+          style={{ backgroundColor: c }}
         />
-      </div>
+      ))}
+      <input
+        type="color"
+        value={colorValue}
+        onChange={(e) => onPatchBody({ color: e.target.value })}
+        aria-label="Chọn màu chữ tùy ý"
+        className="h-9 w-9 cursor-pointer rounded-full border-2 border-white/20 bg-transparent p-0.5"
+      />
     </div>
   );
 }
@@ -252,8 +173,6 @@ export function SimpleSectionEditor() {
   const [videoBusy, setVideoBusy] = useState(false);
   /** Slide đang sửa chữ tại chỗ (null = không sửa slide nào). */
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
-  /** Slide đang ở chế độ kéo-thả chữ (null = không kéo slide nào). */
-  const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [previewIdx, setPreviewIdx] = useState<number | null>(null);
 
   const editorType: SectionEditorType = useMemo(
@@ -341,7 +260,6 @@ export function SimpleSectionEditor() {
       setDraftScales([1]);
       setDrafts(fresh);
       setEditingIdx(null);
-      setDragIdx(null);
       toast('Đã tạo 1 slide chỉ có ảnh nền. Bấm “Lưu nội dung” để lưu.', 'success');
       return;
     }
@@ -555,6 +473,17 @@ export function SimpleSectionEditor() {
         const body = bodyObjOf(d.objects);
         if (!body) return d;
         return { ...d, objects: d.objects.map((o) => (o.id === body.id ? { ...o, ...patch } : o)) };
+      });
+    });
+  };
+
+  /** Đổi thuộc tính của một object bất kỳ trong bản nháp (dùng cho kéo chữ trực tiếp). */
+  const patchDraftObject = (idx: number, objId: string, patch: Partial<SlideObject>) => {
+    setDrafts((prev) => {
+      if (!prev) return prev;
+      return prev.map((d, i) => {
+        if (i !== idx) return d;
+        return { ...d, objects: d.objects.map((o) => (o.id === objId ? { ...o, ...patch } : o)) };
       });
     });
   };
@@ -915,10 +844,7 @@ export function SimpleSectionEditor() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => {
-                        setEditingIdx(editingIdx === i ? null : i);
-                        setDragIdx(null);
-                      }}
+                      onClick={() => setEditingIdx(editingIdx === i ? null : i)}
                       aria-pressed={editingIdx === i}
                       aria-label={`Sửa chữ slide ${i + 1}`}
                       className={
@@ -930,25 +856,6 @@ export function SimpleSectionEditor() {
                     >
                       {editingIdx === i ? '✓ Xong' : '✏️ Sửa'}
                     </button>
-                    {bodyObjOf(d.objects) && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setDragIdx(dragIdx === i ? null : i);
-                          setEditingIdx(null);
-                        }}
-                        aria-pressed={dragIdx === i}
-                        aria-label={`Kéo chữ slide ${i + 1}`}
-                        className={
-                          'min-h-[36px] rounded-lg border px-2.5 text-xs font-bold ' +
-                          (dragIdx === i
-                            ? 'border-violet-500 bg-violet-500/20 text-violet-200'
-                            : 'border-white/10 text-slate-400')
-                        }
-                      >
-                        {dragIdx === i ? '✓ Xong' : '✋ Kéo'}
-                      </button>
-                    )}
                   </div>
                 </div>
                 {editingIdx === i ? (
@@ -971,15 +878,21 @@ export function SimpleSectionEditor() {
                     aria-label={`Nội dung slide ${i + 1}`}
                     className="min-h-[120px] w-full rounded-lg border border-white/10 bg-[#0e0f11] px-2 py-1 text-base text-slate-100"
                   />
-                ) : dragIdx === i && bodyObjOf(d.objects) ? (
-                  <DraggableSlidePreview
-                    slide={toPreviewSlide(d)}
-                    body={bodyObjOf(d.objects) as SlideObject}
-                    aspect={program.aspect_ratio}
-                    onPatchBody={(patch) => patchDraftBody(i, patch)}
-                  />
                 ) : (
-                  <SlideRenderer slide={toPreviewSlide(d)} width={300} aspect={program.aspect_ratio} />
+                  <div>
+                    <SlideRenderer
+                      slide={toPreviewSlide(d)}
+                      width={300}
+                      aspect={program.aspect_ratio}
+                      textDrag={{ onTextMove: (objId, patch) => patchDraftObject(i, objId, patch) }}
+                    />
+                    {bodyObjOf(d.objects) && (
+                      <TextColorRow
+                        body={bodyObjOf(d.objects) as SlideObject}
+                        onPatchBody={(patch) => patchDraftBody(i, patch)}
+                      />
+                    )}
+                  </div>
                 )}
               </div>
             ))}
