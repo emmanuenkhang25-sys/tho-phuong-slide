@@ -93,7 +93,21 @@ export async function duplicateSimpleSection(
   const sectionSlides = slides
     .filter((s) => s.section_id === section.id)
     .sort((a, b) => a.order_index - b.order_index);
-  // Dồn order_index: mục mới chèn ngay sau mục gốc
+  // Dồn các mục đứng sau xuống 1 bậc TRƯỚC khi chèn — tránh trùng order_index
+  // (bản cũ chèn thẳng order_index+1 gây trùng, thứ tự hiển thị bị loạn).
+  const { data: later } = await supabase
+    .from('sections')
+    .select('id,order_index')
+    .eq('program_id', programId)
+    .gt('order_index', section.order_index)
+    .order('order_index');
+  for (const s of (later ?? []) as { id: string; order_index: number }[]) {
+    const { error } = await supabase
+      .from('sections')
+      .update({ order_index: s.order_index + 1 })
+      .eq('id', s.id);
+    if (error) throw new Error(`Dồn thứ tự mục lỗi: ${error.message}`);
+  }
   const { error: sErr } = await supabase.from('sections').insert({
     id: newSectionId,
     program_id: programId,

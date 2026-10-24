@@ -16,7 +16,7 @@ import { downloadBlob, exportFilename } from '../export/lib/units';
 import type { Program, Section, Slide } from '../../lib/types';
 import { uuid } from '../editor/lib/editorUtils';
 import { sectionFormHint } from './sectionForms';
-import { createSimpleProgram } from './programApi';
+import { createSimpleProgram, duplicateSimpleSection } from './programApi';
 import { formatDate } from '../../lib/format';
 
 export function SimpleProgramPage() {
@@ -147,6 +147,32 @@ export function SimpleProgramPage() {
       .eq('program_id', id)
       .order('order_index');
     setSections(((data ?? []) as Section[]).sort((a, b) => a.order_index - b.order_index));
+  };
+
+  const reloadSlides = async () => {
+    if (!id) return;
+    const { data } = await supabase
+      .from('slides')
+      .select('*')
+      .eq('program_id', id)
+      .order('order_index');
+    setSlides(((data ?? []) as Slide[]).sort((a, b) => a.order_index - b.order_index));
+  };
+
+  /** Nhân bản một mục kèm slide (đặt ngay sau mục gốc) — dùng cho thờ phượng 3–5 bài. */
+  const duplicateSection = async (s: Section) => {
+    if (!id) return;
+    setBusy(true);
+    try {
+      await duplicateSimpleSection(supabase, id, s, slides);
+      await reloadSections();
+      await reloadSlides();
+      toast(`Đã nhân bản “${s.title}” — mở bản sao để nhập bài hát mới.`, 'success');
+    } catch (e) {
+      toast(`Nhân bản lỗi: ${(e as Error).message}`, 'error');
+    } finally {
+      setBusy(false);
+    }
   };
 
   /** Thêm mục mới vào cuối. */
@@ -366,13 +392,22 @@ export function SimpleProgramPage() {
               <span className="block truncate text-lg font-bold text-white">{s.title}</span>
               <span className="block truncate text-sm text-slate-400">{rowDesc(s)}</span>
             </button>
-            <span className="flex shrink-0 items-center gap-1">
+            <span className="flex shrink-0 items-center gap-0.5">
+              <button
+                onClick={() => void duplicateSection(s)}
+                disabled={busy}
+                title="Nhân bản mục (thêm bài hát mới)"
+                aria-label={`Nhân bản mục ${s.title}`}
+                className="flex min-h-[44px] min-w-[40px] items-center justify-center rounded-xl text-lg text-slate-300 disabled:opacity-30"
+              >
+                ⧉
+              </button>
               <button
                 onClick={() => void deleteSection(s)}
                 disabled={busy}
                 title="Xóa mục"
                 aria-label={`Xóa mục ${s.title}`}
-                className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-lg text-slate-400 disabled:opacity-30"
+                className="flex min-h-[44px] min-w-[40px] items-center justify-center rounded-xl text-lg text-slate-400 disabled:opacity-30"
               >
                 🗑
               </button>
@@ -381,7 +416,7 @@ export function SimpleProgramPage() {
                 disabled={i === 0 || busy}
                 title="Chuyển mục lên"
                 aria-label={`Chuyển ${s.title} lên`}
-                className="flex min-h-[44px] min-w-[40px] items-center justify-center rounded-xl text-lg text-slate-300 disabled:opacity-20"
+                className="flex min-h-[44px] min-w-[36px] items-center justify-center rounded-xl text-lg text-slate-300 disabled:opacity-20"
               >
                 ∧
               </button>
@@ -390,7 +425,7 @@ export function SimpleProgramPage() {
                 disabled={i === sections.length - 1 || busy}
                 title="Chuyển mục xuống"
                 aria-label={`Chuyển ${s.title} xuống`}
-                className="flex min-h-[44px] min-w-[40px] items-center justify-center rounded-xl text-lg text-slate-300 disabled:opacity-20"
+                className="flex min-h-[44px] min-w-[36px] items-center justify-center rounded-xl text-lg text-slate-300 disabled:opacity-20"
               >
                 ∨
               </button>
