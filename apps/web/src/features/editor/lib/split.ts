@@ -81,7 +81,7 @@ function makeLabelObject(text: string): SplitSlideObject {
     id: genId('obj'), type: 'text',
     x: 8, y: 13, w: 84, h: 7, z: 10,
     text, fontFamily: 'Arial, sans-serif', fontSize: 24,
-    color: '#fde68a', bold: false, italic: true,
+    color: '#ffffff', bold: false, italic: true,
     align: 'center', lineHeight: 1.3,
   };
 }

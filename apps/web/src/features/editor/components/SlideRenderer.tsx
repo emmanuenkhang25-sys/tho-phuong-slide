@@ -28,7 +28,7 @@ export interface SlideRendererProps {
 const BASE_W = 960; // fontSize trong SlideObject tính theo slide rộng 960px
 
 function backgroundStyle(bg: SlideBackground | undefined | null): CSSProperties {
-  if (!bg) return { backgroundColor: '#1e3a5f' };
+  if (!bg) return { backgroundColor: '#000000' };
   if (bg.type === 'gradient' && bg.gradient) {
     const { from, to, angle } = bg.gradient;
     return { background: `linear-gradient(${angle ?? 135}deg, ${from}, ${to})` };
@@ -41,7 +41,7 @@ function backgroundStyle(bg: SlideBackground | undefined | null): CSSProperties 
       backgroundColor: '#111827',
     };
   }
-  return { backgroundColor: bg.color ?? '#1e3a5f' };
+  return { backgroundColor: bg.color ?? '#000000' };
 }
 
 function ObjectView({
@@ -98,6 +98,23 @@ function ObjectView({
             alt=""
             draggable={false}
             style={{ width: '100%', height: '100%', objectFit: 'fill', display: 'block' }}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
+  // video — phát trong trình chiếu, bấm để phát/dừng trong bản xem trước
+  if (obj.type === 'video') {
+    return (
+      <div style={box}>
+        {obj.src ? (
+          <video
+            src={obj.src}
+            controls
+            playsInline
+            preload="metadata"
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', backgroundColor: '#000000' }}
           />
         ) : null}
       </div>

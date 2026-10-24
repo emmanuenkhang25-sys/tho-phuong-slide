@@ -177,6 +177,28 @@ export function SimpleProgramPage() {
     }
   };
 
+  /** Thêm nhanh 1 mục thờ phượng (đủ 2 ô: tên bài hát + lời) rồi mở ngay màn sửa. */
+  const quickAddSong = async () => {
+    if (!id) return;
+    setBusy(true);
+    try {
+      const newId = uuid();
+      const { error } = await supabase.from('sections').insert({
+        id: newId,
+        program_id: id,
+        title: 'Tôn vinh Chúa',
+        kind: 'ton-vinh-chua',
+        order_index: sections.length,
+      });
+      if (error) throw new Error(`Thêm bài hát lỗi: ${error.message}`);
+      navigate(`/p/${id}/muc/${newId}`);
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   /** Thêm mục mới vào cuối. */
   const addSection = async () => {
     if (!id || !newName.trim()) {
@@ -436,12 +458,21 @@ export function SimpleProgramPage() {
         ))}
       </ul>
 
-      <button
-        onClick={() => setShowAdd(true)}
-        className="mt-3 flex min-h-[56px] items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-white/15 text-base font-bold text-slate-300"
-      >
-        ＋ Thêm mục mới
-      </button>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <button
+          onClick={() => setShowAdd(true)}
+          className="flex min-h-[56px] items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-white/15 text-base font-bold text-slate-300"
+        >
+          ＋ Thêm mục mới
+        </button>
+        <button
+          onClick={() => void quickAddSong()}
+          disabled={busy}
+          className="flex min-h-[56px] items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-violet-500/40 text-base font-bold text-violet-200 disabled:opacity-50"
+        >
+          🎵 Thêm bài hát
+        </button>
+      </div>
 
       {/* Ngăn kéo menu */}
       {menuOpen && (

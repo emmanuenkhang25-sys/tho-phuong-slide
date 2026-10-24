@@ -21,10 +21,11 @@ describe('SUNDAY_PROGRAM_TEMPLATE', () => {
     ]);
   });
 
-  it('mỗi mục có kind hợp lệ và background gradient', () => {
+  it('mỗi mục có kind hợp lệ và nền đen mặc định', () => {
     for (const s of SUNDAY_PROGRAM_TEMPLATE.sections) {
       expect(s.kind).toBeTruthy();
-      expect(s.background.type).toBe('gradient');
+      expect(s.background.type).toBe('color');
+      expect(s.background.color).toBe('#000000');
     }
   });
 });

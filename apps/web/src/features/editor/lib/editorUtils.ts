@@ -52,7 +52,7 @@ export function sectionKindLabel(kind: string): string {
 }
 
 export function defaultSlideBackground(): SlideBackground {
-  return { type: 'color', color: '#1e3a5f' };
+  return { type: 'color', color: '#000000' };
 }
 
 export function newTextObject(partial: Partial<SlideObject> = {}): SlideObject {

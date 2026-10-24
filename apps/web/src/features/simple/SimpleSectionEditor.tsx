@@ -3,14 +3,12 @@
 // SimpleSectionEditor — sửa MỘT mục: form đúng loại nội dung, dán chữ →
 // tự tạo slide → xem trước → lưu. Không cần biết gì về slide thủ công.
 // ============================================================================
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useToast } from '../../components/ui';
 import { SlideRenderer } from '../editor/components/SlideRenderer';
 import { uuid } from '../editor/lib/editorUtils';
-import { defaultSlideBackground } from '../editor/lib/editorUtils';
-import { SUNDAY_PROGRAM_TEMPLATE } from '../templates/programTemplates';
 import {
   FONT_SIZE_PRESETS,
   scaleDraftFonts,
@@ -19,7 +17,14 @@ import {
   splitPlainText,
   type SlideDraft,
 } from '../editor/lib/split';
-import type { Program, Section, Slide, SlideBackground, SlideObject } from '../../lib/types';
+import type {
+  AspectRatio,
+  Program,
+  Section,
+  Slide,
+  SlideBackground,
+  SlideObject,
+} from '../../lib/types';
 import { sectionEditorType, sectionFormHint, type SectionEditorType } from './sectionForms';
 import { duplicateSimpleSection } from './programApi';
 
@@ -43,7 +48,24 @@ function smallText(slide: { content: { objects: SlideObject[] } }): SlideObject 
   return best;
 }
 
-/** Thu nhỏ ảnh tải lên thành JPEG data URL (tối đa 1280px) — nhẹ, lưu thẳng vào slide. */
+/** Object text thân bài (chữ lớn nhất, có nội dung) trong một mảng object. */
+function bodyObjOf(objects: SlideObject[]): SlideObject | undefined {
+  let best: SlideObject | undefined;
+  for (const o of objects) {
+    if (o.type === 'text' && o.text && (o.fontSize ?? 0) > (best?.fontSize ?? -1)) best = o;
+  }
+  return best;
+}
+
+/** Đọc file thành data URL (dùng cho video — video không thu nhỏ được như ảnh). */
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result as string);
+    r.onerror = () => reject(new Error('Không đọc được file.'));
+    r.readAsDataURL(file);
+  });
+}
 function downscaleImage(file: File, maxDim = 1280): Promise<string> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -81,6 +103,124 @@ const inputCls =
   'min-h-[52px] w-full rounded-xl border border-white/10 bg-[#0e0f11] px-3 py-2 text-base text-white';
 const labelCls = 'mb-1 block text-sm font-bold text-slate-300';
 
+/** Bảng màu chữ nhanh cho slide (kèm ô chọn màu tùy ý). */
+const TEXT_COLORS = ['#ffffff', '#fde047', '#f87171', '#fb923c', '#60a5fa', '#4ade80', '#000000'];
+
+/**
+ * Bản xem trước slide ở chế độ sắp chữ: kéo-thả chữ đến vị trí mong muốn
+ * (kéo ngay trên slide, tọa độ % nên khớp cả khi trình chiếu) và đổi màu chữ.
+ */
+function DraggableSlidePreview({
+  slide,
+  body,
+  aspect,
+  onPatchBody,
+}: {
+  slide: Slide;
+  body: SlideObject;
+  aspect: AspectRatio;
+  onPatchBody: (patch: Partial<SlideObject>) => void;
+}) {
+  const dragRef = useRef<{
+    startX: number;
+    startY: number;
+    origX: number;
+    origY: number;
+    w: number;
+    h: number;
+    rectW: number;
+    rectH: number;
+  } | null>(null);
+
+  const onDragStart = (e: ReactPointerEvent) => {
+    const boxEl = (e.currentTarget as HTMLElement).parentElement;
+    const rect = boxEl?.getBoundingClientRect();
+    if (!rect) return;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    dragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      origX: body.x,
+      origY: body.y,
+      w: body.w,
+      h: body.h,
+      rectW: rect.width,
+      rectH: rect.height,
+    };
+  };
+  const onDragMove = (e: ReactPointerEvent) => {
+    const st = dragRef.current;
+    if (!st) return;
+    const nx = Math.min(
+      Math.max(0, st.origX + ((e.clientX - st.startX) / st.rectW) * 100),
+      Math.max(0, 100 - st.w),
+    );
+    const ny = Math.min(
+      Math.max(0, st.origY + ((e.clientY - st.startY) / st.rectH) * 100),
+      Math.max(0, 100 - st.h),
+    );
+    onPatchBody({ x: Math.round(nx * 10) / 10, y: Math.round(ny * 10) / 10 });
+  };
+  const onDragEnd = () => {
+    dragRef.current = null;
+  };
+
+  const colorValue = /^#[0-9a-fA-F]{6}$/.test(body.color ?? '') ? (body.color as string) : '#ffffff';
+
+  return (
+    <div>
+      <div className="relative w-fit">
+        <SlideRenderer slide={slide} width={300} aspect={aspect} />
+        <div
+          role="button"
+          aria-label="Kéo để di chuyển chữ"
+          onPointerDown={onDragStart}
+          onPointerMove={onDragMove}
+          onPointerUp={onDragEnd}
+          onPointerCancel={onDragEnd}
+          className="absolute z-10 rounded border-2 border-dashed border-violet-400 bg-violet-500/10"
+          style={{
+            left: `${body.x}%`,
+            top: `${body.y}%`,
+            width: `${body.w}%`,
+            height: `${body.h}%`,
+            touchAction: 'none',
+            cursor: 'grab',
+          }}
+        >
+          <span className="absolute -top-6 left-0 whitespace-nowrap rounded bg-violet-500 px-1.5 py-0.5 text-[11px] font-bold text-white">
+            ✋ Kéo để di chuyển
+          </span>
+        </div>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <span className="text-xs font-bold text-slate-400">Màu chữ:</span>
+        {TEXT_COLORS.map((c) => (
+          <button
+            key={c}
+            type="button"
+            onClick={() => onPatchBody({ color: c })}
+            aria-label={`Đổi màu chữ ${c}`}
+            aria-pressed={body.color === c}
+            className={
+              'h-9 w-9 rounded-full border-2 ' +
+              (body.color === c ? 'border-violet-400' : 'border-white/20')
+            }
+            style={{ backgroundColor: c }}
+          />
+        ))}
+        <input
+          type="color"
+          value={colorValue}
+          onChange={(e) => onPatchBody({ color: e.target.value })}
+          aria-label="Chọn màu chữ tùy ý"
+          className="h-9 w-9 cursor-pointer rounded-full border-2 border-white/20 bg-transparent p-0.5"
+        />
+      </div>
+    </div>
+  );
+}
+
 export function SimpleSectionEditor() {
   const { id: programId, sectionId } = useParams<{ id: string; sectionId: string }>();
   const { toast } = useToast();
@@ -108,8 +248,12 @@ export function SimpleSectionEditor() {
   const [customBg, setCustomBg] = useState<SlideBackground | null>(null);
   const [bgBusy, setBgBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLInputElement>(null);
+  const [videoBusy, setVideoBusy] = useState(false);
   /** Slide đang sửa chữ tại chỗ (null = không sửa slide nào). */
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
+  /** Slide đang ở chế độ kéo-thả chữ (null = không kéo slide nào). */
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [previewIdx, setPreviewIdx] = useState<number | null>(null);
 
   const editorType: SectionEditorType = useMemo(
@@ -170,15 +314,11 @@ export function SimpleSectionEditor() {
     void load();
   }, [programId, sectionId]);
 
-  /** Nền mặc định của mục (gradient mẫu theo loại mục, rồi nền chung chương trình). */
-  const defaultSectionBg: SlideBackground = useMemo(() => {
-    const fromTemplate = SUNDAY_PROGRAM_TEMPLATE.sections.find(
-      (t) => t.kind === section?.kind,
-    )?.background;
-    if (fromTemplate) return { ...fromTemplate };
-    const progBg = program?.design_template?.defaultBackground as SlideBackground | undefined;
-    return progBg ?? defaultSlideBackground();
-  }, [section?.kind, program]);
+  /** Nền mặc định của mục: luôn nền đen chữ trắng (không dùng gradient mẫu nữa). */
+  const defaultSectionBg: SlideBackground = useMemo(
+    () => ({ type: 'color', color: '#000000' }),
+    [],
+  );
   /** Nền đang dùng: ảnh tải lên ưu tiên, rồi nền slide hiện tại, rồi mặc định. */
   const background: SlideBackground = useMemo(() => {
     if (customBg) return customBg;
@@ -189,13 +329,20 @@ export function SimpleSectionEditor() {
 
   /** Tạo slide từ nội dung đã nhập (theo loại mục). */
   const generateSlides = () => {
-    if (editorType === 'sermon') {
-      if (!sermonTopic.trim() && !content.trim()) {
-        toast('Hãy nhập chủ đề hoặc nội dung bài giảng.', 'error');
-        return;
-      }
-    } else if (!content.trim()) {
-      toast('Hãy nhập nội dung trước.', 'error');
+    // Không nhập gì vẫn tạo được 1 slide chỉ có ảnh nền — có những slide chỉ
+    // cần chiếu một bức ảnh đã đủ thông tin, không cần thêm chữ.
+    const hasContent =
+      content.trim() !== '' || (editorType === 'sermon' && sermonTopic.trim() !== '');
+    if (!hasContent) {
+      const fresh: SlideDraft[] = [
+        { objects: [], background: { ...background }, label: 'Ảnh nền' },
+      ];
+      basesRef.current = [[]];
+      setDraftScales([1]);
+      setDrafts(fresh);
+      setEditingIdx(null);
+      setDragIdx(null);
+      toast('Đã tạo 1 slide chỉ có ảnh nền. Bấm “Lưu nội dung” để lưu.', 'success');
       return;
     }
     let res: { title?: string; slides: SlideDraft[] };
@@ -205,7 +352,8 @@ export function SimpleSectionEditor() {
         linesPerSlide: Math.min(fontPreset.linesPerSlide, 3),
         // Truyền hệ số cỡ chữ để bộ chia ước tính đúng quấn dòng.
         fontScale: fontPreset.fontScale,
-        title: songTitle.trim() || section?.title,
+        // Chỉ tên bài hát do người dùng nhập mới lên slide — không tự gắn tên mục.
+        title: songTitle.trim() || undefined,
         background,
       });
       res = { title: r.title, slides: scaleDraftFonts(r.slides, fontPreset.fontScale) };
@@ -222,7 +370,7 @@ export function SimpleSectionEditor() {
       const titleObjs: SlideObject[] = [
         {
           id: uuid(), type: 'text', x: 8, y: 30, w: 84, h: 26, z: 5,
-          text: sermonTopic.trim() || section?.title || 'Bài giảng',
+          text: sermonTopic.trim() || 'Bài giảng',
           fontFamily: 'Arial, sans-serif', fontSize: 64, color: '#ffffff',
           bold: true, align: 'center', lineHeight: 1.3,
         },
@@ -242,9 +390,9 @@ export function SimpleSectionEditor() {
       }
       res = { slides: ds };
     } else {
+      // Không gắn tên mục lên slide.
       const r = splitPlainText(content, {
         maxLinesPerSlide: 6,
-        title: section?.title,
         background,
       });
       res = { title: r.title, slides: scaleDraftFonts(r.slides, fontPreset.fontScale) };
@@ -315,7 +463,40 @@ export function SimpleSectionEditor() {
     }
   };
 
-  /** Về nền mặc định (gradient mẫu của loại mục). */
+  /** Chèn video thành 1 slide riêng (video phủ kín slide, phát khi trình chiếu). */
+  const onPickVideo = async (file: File | undefined) => {
+    if (!file || !programId || !sectionId) return;
+    const MAX_VIDEO = 30 * 1024 * 1024;
+    if (file.size > MAX_VIDEO) {
+      toast(
+        `Video quá lớn (${(file.size / 1048576).toFixed(0)}MB). Hãy chọn video dưới 30MB (cắt ngắn hoặc giảm chất lượng) để lưu được.`,
+        'error',
+      );
+      return;
+    }
+    setVideoBusy(true);
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      const videoSlide: SlideDraft = {
+        objects: [
+          { id: uuid(), type: 'video', x: 0, y: 0, w: 100, h: 100, z: 5, src: dataUrl },
+        ],
+        background: { ...background },
+        label: 'Video',
+      };
+      const next = drafts ? [...drafts, videoSlide] : [videoSlide];
+      basesRef.current = next.map((d) => d.objects.map((o) => o.fontSize ?? 0));
+      setDraftScales(next.map(() => 1));
+      setDrafts(next);
+      toast('Đã thêm slide video. Bấm “Lưu nội dung” để lưu.', 'success');
+    } catch {
+      toast('Không đọc được file video.', 'error');
+    } finally {
+      setVideoBusy(false);
+    }
+  };
+
+  /** Về nền mặc định (nền đen). */
   const resetBackground = async () => {
     if (!programId || !sectionId) return;
     setCustomBg(null);
@@ -361,6 +542,19 @@ export function SimpleSectionEditor() {
         });
         if (bi < 0) return d;
         return { ...d, objects: d.objects.map((o, j) => (j === bi ? { ...o, text: value } : o)) };
+      });
+    });
+  };
+
+  /** Đổi thuộc tính của object thân bài trong bản nháp (dùng cho kéo-thả, đổi màu). */
+  const patchDraftBody = (idx: number, patch: Partial<SlideObject>) => {
+    setDrafts((prev) => {
+      if (!prev) return prev;
+      return prev.map((d, i) => {
+        if (i !== idx) return d;
+        const body = bodyObjOf(d.objects);
+        if (!body) return d;
+        return { ...d, objects: d.objects.map((o) => (o.id === body.id ? { ...o, ...patch } : o)) };
       });
     });
   };
@@ -647,6 +841,33 @@ export function SimpleSectionEditor() {
           />
         </div>
 
+        {/* Chèn video thành 1 slide riêng */}
+        <div className="mb-3">
+          <button
+            type="button"
+            onClick={() => videoRef.current?.click()}
+            disabled={videoBusy}
+            className="flex min-h-[52px] w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-[#1b1e22] px-3 text-sm font-bold text-slate-200 disabled:opacity-50"
+          >
+            {videoBusy ? '⏳ Đang xử lý…' : '🎬 Chèn video vào slide'}
+          </button>
+          <p className="mt-1 text-xs text-slate-500">
+            Video sẽ thành 1 slide riêng (tối đa 30MB) — bấm “Lưu nội dung” để lưu.
+          </p>
+          <input
+            ref={videoRef}
+            type="file"
+            accept="video/*"
+            className="hidden"
+            aria-label="Chọn video"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = '';
+              void onPickVideo(f);
+            }}
+          />
+        </div>
+
         <button onClick={generateSlides} disabled={busy} className={btnPrimary + ' w-full'}>
           ✨ Tự động tạo slide
         </button>
@@ -694,7 +915,10 @@ export function SimpleSectionEditor() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => setEditingIdx(editingIdx === i ? null : i)}
+                      onClick={() => {
+                        setEditingIdx(editingIdx === i ? null : i);
+                        setDragIdx(null);
+                      }}
                       aria-pressed={editingIdx === i}
                       aria-label={`Sửa chữ slide ${i + 1}`}
                       className={
@@ -706,6 +930,25 @@ export function SimpleSectionEditor() {
                     >
                       {editingIdx === i ? '✓ Xong' : '✏️ Sửa'}
                     </button>
+                    {bodyObjOf(d.objects) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDragIdx(dragIdx === i ? null : i);
+                          setEditingIdx(null);
+                        }}
+                        aria-pressed={dragIdx === i}
+                        aria-label={`Kéo chữ slide ${i + 1}`}
+                        className={
+                          'min-h-[36px] rounded-lg border px-2.5 text-xs font-bold ' +
+                          (dragIdx === i
+                            ? 'border-violet-500 bg-violet-500/20 text-violet-200'
+                            : 'border-white/10 text-slate-400')
+                        }
+                      >
+                        {dragIdx === i ? '✓ Xong' : '✋ Kéo'}
+                      </button>
+                    )}
                   </div>
                 </div>
                 {editingIdx === i ? (
@@ -727,6 +970,13 @@ export function SimpleSectionEditor() {
                     rows={4}
                     aria-label={`Nội dung slide ${i + 1}`}
                     className="min-h-[120px] w-full rounded-lg border border-white/10 bg-[#0e0f11] px-2 py-1 text-base text-slate-100"
+                  />
+                ) : dragIdx === i && bodyObjOf(d.objects) ? (
+                  <DraggableSlidePreview
+                    slide={toPreviewSlide(d)}
+                    body={bodyObjOf(d.objects) as SlideObject}
+                    aspect={program.aspect_ratio}
+                    onPatchBody={(patch) => patchDraftBody(i, patch)}
                   />
                 ) : (
                   <SlideRenderer slide={toPreviewSlide(d)} width={300} aspect={program.aspect_ratio} />

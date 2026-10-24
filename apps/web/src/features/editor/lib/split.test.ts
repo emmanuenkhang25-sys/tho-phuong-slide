@@ -251,4 +251,24 @@ describe('splitPlainText', () => {
     const titles = slides[0].objects.filter((o) => o.type === 'text' && o.text === 'Cầu nguyện');
     expect(titles.length).toBe(1);
   });
+
+  it('không truyền title → slide không có object tiêu đề (không tự gắn tên mục)', () => {
+    const { slides } = splitPlainText('Nội dung cầu nguyện.\nDòng thứ hai.', {});
+    expect(slides).toHaveLength(1);
+    const titles = slides[0].objects.filter((o) => o.type === 'text' && (o.fontSize ?? 0) <= 32);
+    expect(titles).toHaveLength(0);
+  });
+});
+
+describe('không tự gắn tên mục lên slide bài hát', () => {
+  it('splitLyrics không title + tắt autoTitle → slide chỉ có thân bài', () => {
+    const lyrics = 'Nguyện Thần Ngài\nDẫn dắt con đi\n\nĐoạn hai mở đầu\nHát vang ngợi khen';
+    const { slides } = splitLyrics(lyrics, { autoTitle: false });
+    expect(slides.length).toBeGreaterThanOrEqual(1);
+    for (const s of slides) {
+      const texts = s.objects.filter((o) => o.type === 'text' && o.text);
+      expect(texts).toHaveLength(1);
+      expect(texts[0].fontSize).toBeGreaterThanOrEqual(40);
+    }
+  });
 });

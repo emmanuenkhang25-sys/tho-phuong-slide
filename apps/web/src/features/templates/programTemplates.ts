@@ -2,8 +2,8 @@
 // Thờ Phượng Slide — MẪU CHƯƠNG TRÌNH có sẵn
 // ----------------------------------------------------------------------------
 // "Chương trình thờ phượng Chúa nhật": 10 mục theo đúng thứ tự buổi lễ
-// Tin Lành Việt Nam. Mỗi mục có sẵn 1 slide tiêu đề với background gradient
-// đẹp — người dùng chỉ việc bấm vào mục để soạn nội dung.
+// Tin Lành Việt Nam. Mỗi mục có sẵn 1 slide tiêu đề, nền đen chữ trắng
+// mặc định — người dùng chỉ việc bấm vào mục để soạn nội dung.
 // ============================================================================
 import type { Section, Slide, SlideBackground, SlideObject } from '../../lib/types';
 import { uuid } from '../editor/lib/editorUtils';
@@ -24,12 +24,6 @@ export interface ProgramTemplateSection {
   slideSubtitle?: string;
   background: SlideBackground;
 }
-
-const grad = (from: string, to: string): SlideBackground => ({
-  type: 'gradient',
-  gradient: { from, to, angle: 135 },
-  overlayOpacity: 0.15,
-});
 
 function titleObjects(title: string, subtitle?: string): SlideObject[] {
   const objs: SlideObject[] = [
@@ -73,68 +67,68 @@ export const SUNDAY_PROGRAM_TEMPLATE: ProgramTemplateDef = {
       kind: 'chao-mung',
       slideTitle: 'CHÀO MỪNG',
       slideSubtitle: 'Chào mừng quý tôi con Chúa đến với buổi thờ phượng',
-      background: grad('#1e3a8a', '#7c3aed'),
+      background: { type: 'color', color: '#000000' },
     },
     {
       title: 'Tôn vinh Chúa',
       kind: 'ton-vinh-chua',
       slideTitle: 'TÔN VINH CHÚA',
       slideSubtitle: 'Nhấn vào mục này rồi bấm "🎵 Thêm bài hát" để thêm lời bài hát',
-      background: grad('#2b1055', '#7597de'),
+      background: { type: 'color', color: '#000000' },
     },
     {
       title: 'Cầu nguyện khai lễ',
       kind: 'cau-nguyen-khai-le',
       slideTitle: 'CẦU NGUYỆN KHAI LỄ',
-      background: grad('#78350f', '#d97706'),
+      background: { type: 'color', color: '#000000' },
     },
     {
       title: 'Đọc Kinh Thánh',
       kind: 'doc-kinh-thanh',
       slideTitle: 'ĐỌC KINH THÁNH',
       slideSubtitle: 'Nhấn vào mục này để nhập đoạn Kinh Thánh',
-      background: grad('#14532d', '#16a34a'),
+      background: { type: 'color', color: '#000000' },
     },
     {
       title: 'Tôn vinh Chúa tiếp tục',
       kind: 'ton-vinh-chua-2',
       slideTitle: 'TÔN VINH CHÚA',
       slideSubtitle: 'Nhấn vào mục này rồi bấm "🎵 Thêm bài hát" để thêm lời bài hát',
-      background: grad('#4c1d95', '#a78bfa'),
+      background: { type: 'color', color: '#000000' },
     },
     {
       title: 'Dâng hiến',
       kind: 'dang-hien',
       slideTitle: 'DÂNG HIẾN',
       slideSubtitle: 'Của lễ dâng lên cho Chúa với lòng biết ơn',
-      background: grad('#3a2b00', '#b8860b'),
+      background: { type: 'color', color: '#000000' },
     },
     {
       title: 'Giảng Lời Chúa',
       kind: 'giang-loi-chua',
       slideTitle: 'GIẢNG LỜI CHÚA',
       slideSubtitle: 'Nhấn vào mục này để nhập chủ đề và câu gốc',
-      background: grad('#0c4a6e', '#0284c7'),
+      background: { type: 'color', color: '#000000' },
     },
     {
       title: 'Đáp ứng Lời Chúa',
       kind: 'dap-ung-loi-chua',
       slideTitle: 'ĐÁP ỨNG LỜI CHÚA',
       slideSubtitle: 'Nhấn vào mục này rồi bấm "🎵 Thêm bài hát" để thêm bài đáp ứng',
-      background: grad('#831843', '#db2777'),
+      background: { type: 'color', color: '#000000' },
     },
     {
       title: 'Cầu thay và thông báo',
       kind: 'cau-thay-thong-bao',
       slideTitle: 'CẦU THAY & THÔNG BÁO',
-      background: grad('#1e1b4b', '#4c1d95'),
+      background: { type: 'color', color: '#000000' },
     },
     {
       title: 'Cầu nguyện tất lễ và chúc phước',
       kind: 'cau-nguyen-tat-le',
       slideTitle: 'CẦU NGUYỆN TẤT LỄ',
       slideSubtitle: 'Hẹn gặp lại quý vị Chúa nhật tuần sau',
-      background: grad('#111827', '#4b5563'),
+      background: { type: 'color', color: '#000000' },
     },
   ],
 };

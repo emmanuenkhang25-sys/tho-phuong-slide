@@ -173,6 +173,30 @@ export async function exportPPTX(
         } else {
           warnings.push(`Slide ${slideNo}: bỏ qua một ảnh vì không tải được dữ liệu ảnh.`);
         }
+      } else if (obj.type === 'video' && obj.src) {
+        // Video: data URL → prop `data` (bỏ tiền tố `data:`, giữ `video/mp4;base64,…`);
+        // URL http(s) → prop `path`. Lỗi → warning, không làm hỏng cả file.
+        const url = await resolveImageDataUrl(obj.src, program.church_id);
+        if (url) {
+          try {
+            if (url.startsWith('data:')) {
+              slide.addMedia({
+                type: 'video',
+                data: url.slice('data:'.length),
+                x: box.x,
+                y: box.y,
+                w: box.w,
+                h: box.h,
+              });
+            } else {
+              slide.addMedia({ type: 'video', path: url, x: box.x, y: box.y, w: box.w, h: box.h });
+            }
+          } catch {
+            warnings.push(`Slide ${slideNo}: không nhúng được video — slide này sẽ không có video trong file PPTX.`);
+          }
+        } else {
+          warnings.push(`Slide ${slideNo}: bỏ qua video vì không tải được dữ liệu video.`);
+        }
       }
     }
   }

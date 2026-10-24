@@ -68,7 +68,7 @@ export interface Section {
 /** Đối tượng trên slide — tọa độ % (0–100) so với slide (CONTRACT 3.6.1). */
 export interface SlideObject {
   id: string; // uuid phía client
-  type: 'text' | 'image' | 'shape';
+  type: 'text' | 'image' | 'shape' | 'video';
   x: number;
   y: number;
   w: number;

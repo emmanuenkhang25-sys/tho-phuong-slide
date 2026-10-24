@@ -148,6 +148,19 @@ export function PresenterPage() {
   useEffect(() => {
     indexRef.current = index;
   }, [index]);
+
+  // Tự phát video trên slide đang chiếu (chuyển slide là thao tác của người dùng
+  // nên trình duyệt thường cho phát kèm tiếng; nếu bị chặn, bấm nút phát trên video).
+  const slideBoxRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = slideBoxRef.current;
+    if (!el) return;
+    el.querySelectorAll('video').forEach((v) => {
+      v.play().catch(() => {
+        /* người dùng bấm phát thủ công bằng nút điều khiển của video */
+      });
+    });
+  }, [index, slides]);
   useEffect(() => {
     pausedRef.current = paused;
   }, [paused]);
@@ -529,6 +542,7 @@ export function PresenterPage() {
       <div className="absolute inset-0 flex items-center justify-center">
         <div
           key={slide.id}
+          ref={slideBoxRef}
           style={{ width: slideW, height: slideH, animation: 'tpsFade .18s ease' }}
           className="overflow-hidden"
         >
