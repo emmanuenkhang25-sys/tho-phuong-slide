@@ -7,6 +7,7 @@ import { applyTheme, getStoredTheme, type Theme } from '../lib/theme';
 import { Button, EnvWarning, Spinner, useToast } from './ui';
 
 const NAV = [
+  { to: '/p', label: 'Chương trình', icon: '📋' },
   { to: '/dashboard', label: 'Tổng quan', icon: '🏠' },
   { to: '/hoi-thanh', label: 'Hội thánh', icon: '⛪' },
   { to: '/mau-slide', label: 'Mẫu slide', icon: '🖼️' },

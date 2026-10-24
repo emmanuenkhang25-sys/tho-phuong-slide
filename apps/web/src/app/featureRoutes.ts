@@ -8,6 +8,7 @@ import { templateRoutes } from '../features/templates/routes';
 import { backupRoutes } from '../features/backup/routes';
 import { adminRoutes } from '../features/admin/routes';
 import { helpRoutes } from '../features/help/routes';
+import { simpleRoutes } from '../features/simple/simpleRoutes';
 
 /**
  * Mọi routes tính năng được hợp nhất tại đây.
@@ -22,4 +23,5 @@ export const featureRoutes: RouteObject[] = [
   ...backupRoutes,
   ...adminRoutes,
   ...helpRoutes,
+  ...simpleRoutes,
 ];

@@ -32,7 +32,13 @@ export interface ThumbnailsPanelProps {
 }
 
 /** Các mục hát — hiện nút "Thêm bài hát" nổi bật. */
-const SONG_SECTION_KINDS = new Set(['hat-tho-phuong', 'thanh-ca']);
+const SONG_SECTION_KINDS = new Set([
+  'hat-tho-phuong',
+  'thanh-ca',
+  'ton-vinh-chua',
+  'ton-vinh-chua-2',
+  'dap-ung-loi-chua',
+]);
 
 const smallBtn =
   'inline-flex items-center justify-center rounded border border-slate-300 bg-white text-sm text-slate-600 hover:bg-slate-100 min-w-[40px] min-h-[40px] px-1.5 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700';

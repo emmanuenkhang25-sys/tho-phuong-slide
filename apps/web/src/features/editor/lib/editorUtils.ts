@@ -35,6 +35,15 @@ export const SECTION_KINDS: { value: string; label: string }[] = [
   { value: 'tiec-thanh', label: 'Tiệc Thánh' },
   { value: 'cau-thay', label: 'Cầu thay' },
   { value: 'be-mac', label: 'Bế mạc' },
+  { value: 'chao-mung', label: 'Chào mừng' },
+  { value: 'ton-vinh-chua', label: 'Tôn vinh Chúa' },
+  { value: 'ton-vinh-chua-2', label: 'Tôn vinh Chúa (tiếp)' },
+  { value: 'cau-nguyen-khai-le', label: 'Cầu nguyện khai lễ' },
+  { value: 'doc-kinh-thanh', label: 'Đọc Kinh Thánh' },
+  { value: 'giang-loi-chua', label: 'Giảng Lời Chúa' },
+  { value: 'dap-ung-loi-chua', label: 'Đáp ứng Lời Chúa' },
+  { value: 'cau-thay-thong-bao', label: 'Cầu thay & thông báo' },
+  { value: 'cau-nguyen-tat-le', label: 'Cầu nguyện tất lễ' },
   { value: 'custom', label: 'Tự thêm' },
 ];
 

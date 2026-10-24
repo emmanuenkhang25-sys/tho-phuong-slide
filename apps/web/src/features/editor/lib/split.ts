@@ -314,3 +314,77 @@ export function scaleDraftFonts(drafts: SlideDraft[], scale: number): SlideDraft
     ),
   }));
 }
+
+export interface SplitPlainTextOptions {
+  /** Số dòng tối đa mỗi slide. Mặc định 6. */
+  maxLinesPerSlide?: number;
+  /** Tiêu đề hiển thị nhỏ trên mỗi slide. */
+  title?: string;
+  /** Nền cho các slide tạo ra. */
+  background?: SlideBackground;
+}
+
+/**
+ * Tách văn bản thường (lời chào, lời cầu nguyện, thông báo...) thành slide.
+ * - Giữ nguyên 100% nội dung, chỉ ngắt theo dòng trống có sẵn.
+ * - Mỗi slide tối đa maxLinesPerSlide dòng, chữ căn giữa, cỡ 40px.
+ */
+export function splitPlainText(
+  text: string,
+  opts: SplitPlainTextOptions = {},
+): { title?: string; slides: SlideDraft[] } {
+  const maxLines = Math.max(1, Math.floor(opts.maxLinesPerSlide ?? 6));
+  const background = opts.background ?? defaultSplitBackground();
+  const rawLines = text.split('\n').map((l) => l.trimEnd());
+  // Gom thành đoạn theo dòng trống; đoạn dài quá thì cắt theo dòng
+  const paragraphs: string[] = [];
+  let current: string[] = [];
+  for (const line of rawLines) {
+    if (line.trim() === '') {
+      if (current.length > 0) {
+        paragraphs.push(current.join('\n'));
+        current = [];
+      }
+    } else {
+      current.push(line);
+    }
+  }
+  if (current.length > 0) paragraphs.push(current.join('\n'));
+  if (paragraphs.length === 0) return { title: opts.title, slides: [] };
+
+  // Cắt mỗi đoạn thành các cụm ≤ maxLines dòng
+  const chunks: string[] = [];
+  for (const para of paragraphs) {
+    const lines = para.split('\n');
+    for (let i = 0; i < lines.length; i += maxLines) {
+      chunks.push(lines.slice(i, i + maxLines).join('\n'));
+    }
+  }
+  // Gộp các cụm nhỏ liên tiếp cho đỡ vụn (tổng ≤ maxLines)
+  const groups: string[] = [];
+  let buf = '';
+  let bufLines = 0;
+  for (const chunk of chunks) {
+    const n = chunk.split('\n').length;
+    if (buf && bufLines + n > maxLines) {
+      groups.push(buf);
+      buf = '';
+      bufLines = 0;
+    }
+    buf = buf ? buf + '\n\n' + chunk : chunk;
+    bufLines += n;
+  }
+  if (buf) groups.push(buf);
+
+  const slides: SlideDraft[] = groups.map((body, i) => {
+    const objects: SplitSlideObject[] = [];
+    if (opts.title) objects.push(makeTitleObject(opts.title));
+    objects.push(makeBodyObject(body, { fontSize: 40, top: opts.title ? 16 : 22 }));
+    return {
+      objects,
+      background: { ...background },
+      label: `Phần ${i + 1}`,
+    };
+  });
+  return { title: opts.title, slides };
+}

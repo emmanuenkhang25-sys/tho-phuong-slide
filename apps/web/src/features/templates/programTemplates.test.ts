@@ -9,15 +9,15 @@ describe('SUNDAY_PROGRAM_TEMPLATE', () => {
     const titles = SUNDAY_PROGRAM_TEMPLATE.sections.map((s) => s.title);
     expect(titles).toEqual([
       'Chào mừng',
+      'Tôn vinh Chúa',
       'Cầu nguyện khai lễ',
-      'Đọc Kinh Thánh chung',
-      'Hát thờ phượng ngợi khen',
+      'Đọc Kinh Thánh',
+      'Tôn vinh Chúa tiếp tục',
       'Dâng hiến',
-      'Giảng luận',
-      'Ơn phước và nhu cầu',
-      'Cầu nguyện chung',
-      'Cầu nguyện chúc phước',
-      'Tất lễ',
+      'Giảng Lời Chúa',
+      'Đáp ứng Lời Chúa',
+      'Cầu thay và thông báo',
+      'Cầu nguyện tất lễ và chúc phước',
     ]);
   });
 

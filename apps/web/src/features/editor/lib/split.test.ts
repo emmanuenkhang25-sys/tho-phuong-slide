@@ -2,7 +2,7 @@
 // Nguyên tắc kiểm tra: giữ nguyên 100% nội dung (từng ký tự, trừ dòng nhãn ĐK),
 // không cắt ngang câu khi tránh được, nhận diện điệp khúc, đánh số câu Kinh Thánh.
 import { describe, expect, it } from 'vitest';
-import { FONT_SIZE_PRESETS, scaleDraftFonts, splitBible, splitLyrics } from './split';
+import { FONT_SIZE_PRESETS, scaleDraftFonts, splitBible, splitLyrics, splitPlainText } from './split';
 
 /** Gom toàn bộ text trong các object text của các slide thành 1 chuỗi. */
 function allBodyText(slides: { objects: { type: string; text?: string }[] }[]): string {
@@ -183,5 +183,41 @@ describe('scaleDraftFonts', () => {
     const scales = FONT_SIZE_PRESETS.map((p) => p.fontScale);
     expect(scales[0]).toBeLessThan(scales[1]);
     expect(scales[1]).toBeLessThan(scales[2]);
+  });
+});
+
+describe('splitPlainText', () => {
+  it('giữ nguyên nội dung, chia theo dòng trống, tối đa 6 dòng/slide', () => {
+    const text = 'Lời chào mừng\nhội chúng hôm nay\n\nChúng ta cùng thờ phượng\nChúa trong thần lẽ thật\n\nAmen.';
+    const { slides } = splitPlainText(text, { maxLinesPerSlide: 6 });
+    expect(slides.length).toBeGreaterThanOrEqual(1);
+    const all = slides
+      .map((s) => s.objects.filter((o) => o.type === 'text' && o.text).map((o) => o.text as string).join('\n'))
+      .join('\n');
+    for (const line of ['Lời chào mừng', 'hội chúng hôm nay', 'Chúng ta cùng thờ phượng', 'Amen.']) {
+      expect(all).toContain(line);
+    }
+  });
+
+  it('văn bản dài bị chia thành nhiều slide, mỗi slide không quá giới hạn dòng', () => {
+    const text = Array.from({ length: 20 }, (_, i) => `Dòng thứ ${i + 1}`).join('\n');
+    const { slides } = splitPlainText(text, { maxLinesPerSlide: 6 });
+    expect(slides.length).toBeGreaterThan(1);
+    for (const s of slides) {
+      const body = s.objects.find((o) => o.type === 'text' && (o.fontSize ?? 0) >= 40);
+      const n = (body?.text ?? '').split('\n').length;
+      expect(n).toBeLessThanOrEqual(6);
+    }
+  });
+
+  it('văn bản rỗng → không có slide', () => {
+    expect(splitPlainText('   \n  ').slides).toHaveLength(0);
+  });
+
+  it('có title → slide nào cũng có object tiêu đề', () => {
+    const { slides } = splitPlainText('Nội dung cầu nguyện.', { title: 'Cầu nguyện' });
+    expect(slides).toHaveLength(1);
+    const titles = slides[0].objects.filter((o) => o.type === 'text' && o.text === 'Cầu nguyện');
+    expect(titles.length).toBe(1);
   });
 });

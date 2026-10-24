@@ -1,0 +1,607 @@
+// ============================================================================
+// Thờ Phượng Slide — giao diện đơn giản (mobile-first)
+// SimpleSectionEditor — sửa MỘT mục: form đúng loại nội dung, dán chữ →
+// tự tạo slide → xem trước → lưu. Không cần biết gì về slide thủ công.
+// ============================================================================
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { supabase } from '../../lib/supabase';
+import { useToast } from '../../components/ui';
+import { SlideRenderer } from '../editor/components/SlideRenderer';
+import { uuid } from '../editor/lib/editorUtils';
+import { defaultSlideBackground } from '../editor/lib/editorUtils';
+import {
+  FONT_SIZE_PRESETS,
+  scaleDraftFonts,
+  splitBible,
+  splitLyrics,
+  splitPlainText,
+  type SlideDraft,
+} from '../editor/lib/split';
+import type { Program, Section, Slide, SlideBackground, SlideObject } from '../../lib/types';
+import { sectionEditorType, sectionFormHint, type SectionEditorType } from './sectionForms';
+import { duplicateSimpleSection } from './programApi';
+
+/** Object text có cỡ chữ lớn nhất trong slide (phần "thân bài"). */
+function biggestText(slide: { content: { objects: SlideObject[] } }): SlideObject | undefined {
+  let best: SlideObject | undefined;
+  for (const o of slide.content.objects) {
+    if (o.type === 'text' && o.text && (o.fontSize ?? 0) > (best?.fontSize ?? -1)) best = o;
+  }
+  return best;
+}
+
+/** Object text nhỏ (tiêu đề/phụ đề, fontSize <= 32) trong slide. */
+function smallText(slide: { content: { objects: SlideObject[] } }): SlideObject | undefined {
+  let best: SlideObject | undefined;
+  for (const o of slide.content.objects) {
+    if (o.type === 'text' && o.text && (o.fontSize ?? 99) <= 32) {
+      if (!best || (o.fontSize ?? 0) > (best.fontSize ?? 0)) best = o;
+    }
+  }
+  return best;
+}
+
+const btnPrimary =
+  'flex min-h-[56px] items-center justify-center gap-2 rounded-2xl bg-violet-600 px-4 text-base font-bold text-white disabled:opacity-50';
+const btnSecondary =
+  'flex min-h-[52px] flex-1 items-center justify-center gap-1 rounded-2xl border border-slate-300 bg-white px-2 text-sm font-bold text-slate-700 disabled:opacity-50';
+const inputCls =
+  'min-h-[52px] w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-base text-slate-900';
+const labelCls = 'mb-1 block text-sm font-bold text-slate-700';
+
+export function SimpleSectionEditor() {
+  const { id: programId, sectionId } = useParams<{ id: string; sectionId: string }>();
+  const { toast } = useToast();
+  const navigate = useNavigate();
+
+  const [program, setProgram] = useState<Program | null>(null);
+  const [section, setSection] = useState<Section | null>(null);
+  const [slides, setSlides] = useState<Slide[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  // Form theo loại mục
+  const [secTitle, setSecTitle] = useState('');
+  const [songTitle, setSongTitle] = useState('');
+  const [content, setContent] = useState('');
+  const [reference, setReference] = useState('');
+  const [sermonTopic, setSermonTopic] = useState('');
+  const [sermonVerse, setSermonVerse] = useState('');
+  const [fontPresetId, setFontPresetId] = useState<'vua' | 'to' | 'cuc-to'>('vua');
+
+  const [drafts, setDrafts] = useState<SlideDraft[] | null>(null);
+  const [editSlides, setEditSlides] = useState(false);
+  const [previewIdx, setPreviewIdx] = useState<number | null>(null);
+
+  const editorType: SectionEditorType = useMemo(
+    () => sectionEditorType(section?.kind ?? ''),
+    [section?.kind],
+  );
+  const hint = useMemo(() => sectionFormHint(section?.kind ?? ''), [section?.kind]);
+  const fontPreset = FONT_SIZE_PRESETS.find((x) => x.id === fontPresetId) ?? FONT_SIZE_PRESETS[0];
+
+  useEffect(() => {
+    if (!programId || !sectionId) return;
+    const load = async () => {
+      setLoading(true);
+      const { data: p } = await supabase.from('programs').select('*').eq('id', programId).single();
+      const { data: s } = await supabase.from('sections').select('*').eq('id', sectionId).single();
+      if (!p || !s) {
+        toast('Không tìm thấy mục.', 'error');
+        navigate(`/p/${programId}`, { replace: true });
+        return;
+      }
+      const prog = p as Program;
+      const sec = s as Section;
+      setProgram(prog);
+      setSection(sec);
+      setSecTitle(sec.title);
+      const { data: sls } = await supabase
+        .from('slides')
+        .select('*')
+        .eq('section_id', sectionId)
+        .order('order_index');
+      const ordered = ((sls ?? []) as Slide[]).sort((a, b) => a.order_index - b.order_index);
+      setSlides(ordered);
+      // Dựng lại nội dung nguồn từ các slide hiện có
+      const type = sectionEditorType(sec.kind);
+      const bodies = ordered.map((sl) => biggestText(sl)?.text?.trim() ?? '').filter(Boolean);
+      if (type === 'lyrics') {
+        setSongTitle(smallText(ordered[0])?.text?.trim() ?? '');
+        setContent(bodies.join('\n\n'));
+      } else if (type === 'bible') {
+        setReference(smallText(ordered[0])?.text?.trim() ?? '');
+        setContent(bodies.join('\n\n'));
+      } else if (type === 'sermon') {
+        const first = ordered[0];
+        setSermonTopic(biggestText(first)?.text?.trim() ?? '');
+        setSermonVerse(smallText(first)?.text?.trim() ?? '');
+        setContent(
+          ordered
+            .slice(1)
+            .map((sl) => biggestText(sl)?.text?.trim() ?? '')
+            .filter(Boolean)
+            .join('\n\n'),
+        );
+      } else {
+        setContent(bodies.join('\n\n'));
+      }
+      setLoading(false);
+    };
+    void load();
+  }, [programId, sectionId]);
+
+  const background: SlideBackground = useMemo(() => {
+    const first = slides[0]?.background;
+    if (first) return first;
+    const progBg = program?.design_template?.defaultBackground as SlideBackground | undefined;
+    return progBg ?? defaultSlideBackground();
+  }, [slides, program]);
+
+  /** Tạo slide từ nội dung đã nhập (theo loại mục). */
+  const generateSlides = () => {
+    if (editorType === 'sermon') {
+      if (!sermonTopic.trim() && !content.trim()) {
+        toast('Hãy nhập chủ đề hoặc nội dung bài giảng.', 'error');
+        return;
+      }
+    } else if (!content.trim()) {
+      toast('Hãy nhập nội dung trước.', 'error');
+      return;
+    }
+    let res: { title?: string; slides: SlideDraft[] };
+    if (editorType === 'lyrics') {
+      const r = splitLyrics(content, {
+        linesPerSlide: fontPreset.linesPerSlide,
+        title: songTitle.trim() || section?.title,
+        background,
+      });
+      res = { title: r.title, slides: scaleDraftFonts(r.slides, fontPreset.fontScale) };
+    } else if (editorType === 'bible') {
+      const r = splitBible(content, {
+        versesPerSlide: 2,
+        reference: reference.trim() || undefined,
+        background,
+      });
+      res = { title: r.title, slides: scaleDraftFonts(r.slides, fontPreset.fontScale) };
+    } else if (editorType === 'sermon') {
+      const ds: SlideDraft[] = [];
+      // Slide tiêu đề: chủ đề + câu gốc
+      const titleObjs: SlideObject[] = [
+        {
+          id: uuid(), type: 'text', x: 8, y: 30, w: 84, h: 26, z: 5,
+          text: sermonTopic.trim() || section?.title || 'Bài giảng',
+          fontFamily: 'Arial, sans-serif', fontSize: 64, color: '#ffffff',
+          bold: true, align: 'center', lineHeight: 1.3,
+        },
+      ];
+      if (sermonVerse.trim()) {
+        titleObjs.push({
+          id: uuid(), type: 'text', x: 12, y: 60, w: 76, h: 18, z: 5,
+          text: sermonVerse.trim(),
+          fontFamily: 'Arial, sans-serif', fontSize: 32, color: '#f1f5f9',
+          bold: false, align: 'center', lineHeight: 1.4,
+        });
+      }
+      ds.push({ objects: titleObjs, background: { ...background }, label: 'Chủ đề' });
+      if (content.trim()) {
+        const r = splitPlainText(content, { maxLinesPerSlide: 5, background });
+        ds.push(...scaleDraftFonts(r.slides, fontPreset.fontScale));
+      }
+      res = { slides: ds };
+    } else {
+      const r = splitPlainText(content, {
+        maxLinesPerSlide: 6,
+        title: section?.title,
+        background,
+      });
+      res = { title: r.title, slides: scaleDraftFonts(r.slides, fontPreset.fontScale) };
+    }
+    if (res.slides.length === 0) {
+      toast('Không tạo được slide nào từ nội dung đã nhập.', 'error');
+      return;
+    }
+    // Cấp id object mới cho bản nháp
+    setDrafts(
+      res.slides.map((d) => ({ ...d, objects: d.objects.map((o) => ({ ...o, id: uuid() })) })),
+    );
+    setEditSlides(false);
+    toast(`Đã tạo ${res.slides.length} slide. Bấm “Lưu nội dung” để lưu.`, 'success');
+  };
+
+  /** Sửa chữ của slide thứ i trong bản xem trước (chỉ sửa object thân bài). */
+  const editDraftText = (idx: number, value: string) => {
+    setDrafts((prev) => {
+      if (!prev) return prev;
+      return prev.map((d, i) => {
+        if (i !== idx) return d;
+        let bi = -1;
+        let best = -1;
+        d.objects.forEach((o, j) => {
+          if (o.type === 'text' && (o.fontSize ?? 0) > best) {
+            best = o.fontSize ?? 0;
+            bi = j;
+          }
+        });
+        if (bi < 0) return d;
+        return { ...d, objects: d.objects.map((o, j) => (j === bi ? { ...o, text: value } : o)) };
+      });
+    });
+  };
+
+  /** Lưu: cập nhật slide cũ theo vị trí, thêm mới nếu thừa, xóa bớt nếu dư. */
+  const saveContent = async () => {
+    if (!drafts || drafts.length === 0) {
+      toast('Hãy bấm “Tự động tạo slide” trước khi lưu.', 'error');
+      return;
+    }
+    if (!programId || !sectionId) return;
+    setBusy(true);
+    try {
+      const ordered = [...slides].sort((a, b) => a.order_index - b.order_index);
+      const n = Math.min(ordered.length, drafts.length);
+      for (let i = 0; i < n; i++) {
+        const { error } = await supabase
+          .from('slides')
+          .update({
+            content: { objects: drafts[i].objects },
+            background: drafts[i].background,
+          })
+          .eq('id', ordered[i].id);
+        if (error) throw new Error(`Cập nhật slide ${i + 1} lỗi: ${error.message}`);
+      }
+      if (drafts.length > ordered.length) {
+        const extras = drafts.slice(ordered.length).map((d, k) => ({
+          id: uuid(),
+          program_id: programId,
+          section_id: sectionId,
+          order_index: ordered.length + k,
+          content: { objects: d.objects },
+          background: d.background,
+        }));
+        const { error } = await supabase.from('slides').insert(extras);
+        if (error) throw new Error(`Thêm slide mới lỗi: ${error.message}`);
+      }
+      if (ordered.length > drafts.length) {
+        const surplus = ordered.slice(drafts.length).map((s) => s.id);
+        const { error } = await supabase.from('slides').delete().in('id', surplus);
+        if (error)
+          throw new Error(
+            `Không xóa được ${surplus.length} slide thừa (cần quyền Quản trị viên): ${error.message}`,
+          );
+      }
+      if (secTitle.trim() && section && secTitle.trim() !== section.title) {
+        const { error } = await supabase
+          .from('sections')
+          .update({ title: secTitle.trim() })
+          .eq('id', sectionId);
+        if (error) throw new Error(`Đổi tên mục lỗi: ${error.message}`);
+        setSection({ ...section, title: secTitle.trim() });
+      }
+      // Tải lại slides để đồng bộ
+      const { data } = await supabase
+        .from('slides')
+        .select('*')
+        .eq('section_id', sectionId)
+        .order('order_index');
+      setSlides(((data ?? []) as Slide[]).sort((a, b) => a.order_index - b.order_index));
+      toast('Đã lưu nội dung mục.', 'success');
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const duplicateSection = async () => {
+    if (!programId || !section) return;
+    if (!window.confirm(`Sao chép mục “${section.title}” kèm toàn bộ slide?`)) return;
+    setBusy(true);
+    try {
+      await duplicateSimpleSection(supabase, programId, section, slides);
+      toast('Đã sao chép mục.', 'success');
+      navigate(`/p/${programId}`);
+    } catch (e) {
+      toast(`Sao chép lỗi: ${(e as Error).message}`, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteSection = async () => {
+    if (!programId || !section) return;
+    if (!window.confirm(`Xóa mục “${section.title}” và toàn bộ ${slides.length} slide của nó?`)) return;
+    setBusy(true);
+    try {
+      const { error: slErr } = await supabase.from('slides').delete().eq('section_id', sectionId);
+      if (slErr) throw new Error(`Không xóa được slide (cần quyền Quản trị viên): ${slErr.message}`);
+      const { error: sErr } = await supabase.from('sections').delete().eq('id', sectionId);
+      if (sErr) throw new Error(`Xóa mục lỗi: ${sErr.message}`);
+      toast('Đã xóa mục.', 'success');
+      navigate(`/p/${programId}`);
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toPreviewSlide = (d: SlideDraft): Slide =>
+    ({ id: uuid(), content: { objects: d.objects }, background: d.background }) as Slide;
+
+  if (loading) {
+    return (
+      <div className="mx-auto max-w-xl bg-slate-50 px-4 py-10 text-center text-slate-400">
+        Đang tải mục…
+      </div>
+    );
+  }
+  if (!section || !program) return null;
+
+  return (
+    <div className="mx-auto flex min-h-screen w-full max-w-xl flex-col bg-slate-50 px-4 pb-10 pt-4">
+      {/* Header */}
+      <div className="mb-3 flex items-center gap-2">
+        <button
+          onClick={() => navigate(`/p/${programId}`)}
+          aria-label="Quay lại chương trình"
+          className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl bg-white text-xl text-slate-500 shadow-sm"
+        >
+          ←
+        </button>
+        <input
+          value={secTitle}
+          onChange={(e) => setSecTitle(e.target.value)}
+          aria-label="Tên mục"
+          className="min-w-0 flex-1 rounded-xl border border-transparent bg-transparent px-2 py-1 text-lg font-bold text-slate-900 focus:border-blue-400 focus:bg-white"
+        />
+      </div>
+
+      {/* Thao tác mục */}
+      <div className="mb-3 grid grid-cols-3 gap-2">
+        <button onClick={() => void duplicateSection()} disabled={busy} className={btnSecondary}>
+          ⧉ Sao chép
+        </button>
+        <button
+          onClick={() => navigate(`/chuong-trinh/${programId}`)}
+          className={btnSecondary}
+          title="Mở trình biên tập nâng cao"
+        >
+          🛠 Nâng cao
+        </button>
+        <button
+          onClick={() => void deleteSection()}
+          disabled={busy}
+          className="flex min-h-[52px] flex-1 items-center justify-center gap-1 rounded-2xl border border-red-200 bg-white px-2 text-sm font-bold text-red-600 disabled:opacity-50"
+        >
+          🗑 Xóa mục
+        </button>
+      </div>
+
+      {/* Form theo loại mục */}
+      <div className="rounded-2xl bg-white p-4 shadow-sm">
+        <h2 className="text-base font-bold text-slate-900">{hint.heading}</h2>
+        <p className="mb-3 text-sm text-slate-500">{hint.hint}</p>
+
+        {editorType === 'lyrics' && (
+          <div className="mb-3">
+            <label className={labelCls}>Tên bài hát</label>
+            <input
+              value={songTitle}
+              onChange={(e) => setSongTitle(e.target.value)}
+              placeholder="VD: Ngợi khen Chúa"
+              className={inputCls}
+            />
+          </div>
+        )}
+        {editorType === 'bible' && (
+          <div className="mb-3">
+            <label className={labelCls}>Tham chiếu (VD: Giăng 3:16)</label>
+            <input
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+              placeholder="Giăng 3:16"
+              className={inputCls}
+            />
+          </div>
+        )}
+        {editorType === 'sermon' && (
+          <>
+            <div className="mb-3">
+              <label className={labelCls}>Chủ đề bài giảng</label>
+              <input
+                value={sermonTopic}
+                onChange={(e) => setSermonTopic(e.target.value)}
+                placeholder="VD: Tình yêu thương của Chúa"
+                className={inputCls}
+              />
+            </div>
+            <div className="mb-3">
+              <label className={labelCls}>Câu gốc</label>
+              <input
+                value={sermonVerse}
+                onChange={(e) => setSermonVerse(e.target.value)}
+                placeholder="VD: Giăng 3:16"
+                className={inputCls}
+              />
+            </div>
+          </>
+        )}
+
+        {(editorType === 'lyrics' || editorType === 'bible') && (
+          <div className="mb-3">
+            <label className={labelCls}>Cỡ chữ slide</label>
+            <div className="flex gap-2">
+              {FONT_SIZE_PRESETS.map((fp) => (
+                <button
+                  key={fp.id}
+                  type="button"
+                  onClick={() => setFontPresetId(fp.id)}
+                  className={
+                    'flex-1 rounded-xl border px-2 py-2 text-sm font-bold min-h-[48px] ' +
+                    (fontPresetId === fp.id
+                      ? 'border-violet-600 bg-violet-50 text-violet-700'
+                      : 'border-slate-300 text-slate-500')
+                  }
+                >
+                  {fp.id === 'vua' ? '🔤 Vừa' : fp.id === 'to' ? '🔠 To' : '🔡 Cực to'}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="mb-3">
+          <label className={labelCls}>
+            {editorType === 'lyrics'
+              ? 'Lời bài hát'
+              : editorType === 'bible'
+                ? 'Nội dung Kinh Thánh'
+                : editorType === 'sermon'
+                  ? 'Nội dung cần trình chiếu'
+                  : 'Nội dung'}
+          </label>
+          <textarea
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            placeholder={hint.contentPlaceholder}
+            rows={10}
+            className="min-h-[220px] w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-base text-slate-900"
+          />
+        </div>
+
+        <button onClick={generateSlides} disabled={busy} className={btnPrimary + ' w-full'}>
+          ✨ Tự động tạo slide
+        </button>
+      </div>
+
+      {/* Bản xem trước các slide vừa tạo */}
+      {drafts && (
+        <div className="mt-3 rounded-2xl bg-white p-4 shadow-sm">
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-base font-bold text-slate-900">
+              Xem trước ({drafts.length} slide)
+            </h3>
+            <button
+              onClick={() => setEditSlides((v) => !v)}
+              className="rounded-xl border border-slate-300 px-3 py-2 text-sm font-bold text-slate-600 min-h-[44px]"
+            >
+              {editSlides ? '✓ Xong' : '✏️ Chỉnh sửa slide'}
+            </button>
+          </div>
+          <div className="flex flex-col gap-3">
+            {drafts.map((d, i) => (
+              <div key={i} className="rounded-xl border border-slate-200 p-2">
+                <p className="mb-1 text-xs font-bold text-slate-400">Slide {i + 1}</p>
+                <SlideRenderer slide={toPreviewSlide(d)} width={300} aspect={program.aspect_ratio} />
+                {editSlides && (
+                  <textarea
+                    value={
+                      (() => {
+                        let bi = -1;
+                        let best = -1;
+                        d.objects.forEach((o, j) => {
+                          if (o.type === 'text' && (o.fontSize ?? 0) > best) {
+                            best = o.fontSize ?? 0;
+                            bi = j;
+                          }
+                        });
+                        return bi >= 0 ? (d.objects[bi].text ?? '') : '';
+                      })()
+                    }
+                    onChange={(e) => editDraftText(i, e.target.value)}
+                    rows={4}
+                    className="mt-1 min-h-[80px] w-full rounded-lg border border-slate-300 px-2 py-1 font-mono text-xs"
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button
+              onClick={() => setPreviewIdx(0)}
+              className="flex min-h-[52px] items-center justify-center gap-1 rounded-2xl border border-slate-300 bg-white font-bold text-slate-700"
+            >
+              👁 Xem trước
+            </button>
+            <button
+              onClick={() => void saveContent()}
+              disabled={busy}
+              className="flex min-h-[52px] items-center justify-center gap-1 rounded-2xl bg-blue-600 font-bold text-white disabled:opacity-50"
+            >
+              💾 Lưu nội dung
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Slide hiện tại của mục (trước khi tạo mới) */}
+      {!drafts && slides.length > 0 && (
+        <div className="mt-3 rounded-2xl bg-white p-4 shadow-sm">
+          <h3 className="mb-2 text-base font-bold text-slate-900">
+            Slide hiện tại ({slides.length})
+          </h3>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {slides.map((s, i) => (
+              <div key={s.id} className="w-40 shrink-0">
+                <p className="mb-0.5 text-[11px] font-bold text-slate-400">#{i + 1}</p>
+                <SlideRenderer slide={s} width={160} aspect={program.aspect_ratio} />
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-slate-400">
+            Nhập nội dung ở trên rồi bấm “Tự động tạo slide” để làm mới.
+          </p>
+        </div>
+      )}
+
+      {/* Xem trước toàn màn hình */}
+      {previewIdx !== null && drafts && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-black">
+          <div className="flex items-center justify-between p-3 text-white">
+            <span className="text-sm font-bold">
+              Slide {previewIdx + 1} / {drafts.length}
+            </span>
+            <button
+              onClick={() => setPreviewIdx(null)}
+              aria-label="Đóng xem trước"
+              className="flex min-h-[48px] min-w-[48px] items-center justify-center rounded-xl bg-white/10 text-xl"
+            >
+              ✕
+            </button>
+          </div>
+          <button
+            className="flex flex-1 items-center justify-center p-2"
+            onClick={() => setPreviewIdx((v) => (v === null ? v : (v + 1) % (drafts?.length ?? 1)))}
+            aria-label="Slide tiếp theo"
+          >
+            <SlideRenderer
+              slide={toPreviewSlide(drafts[previewIdx])}
+              width={Math.min(520, typeof window !== 'undefined' ? window.innerWidth - 16 : 360)}
+              aspect={program.aspect_ratio}
+            />
+          </button>
+          <div className="flex gap-2 p-4">
+            <button
+              onClick={() =>
+                setPreviewIdx((v) => (v === null ? v : (v - 1 + (drafts?.length ?? 1)) % (drafts?.length ?? 1)))
+              }
+              className="flex min-h-[56px] flex-1 items-center justify-center rounded-2xl bg-white/10 text-lg font-bold text-white"
+            >
+              ‹ Trước
+            </button>
+            <button
+              onClick={() => setPreviewIdx((v) => (v === null ? v : (v + 1) % (drafts?.length ?? 1)))}
+              className="flex min-h-[56px] flex-1 items-center justify-center rounded-2xl bg-white/10 text-lg font-bold text-white"
+            >
+              Sau ›
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default SimpleSectionEditor;
