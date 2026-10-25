@@ -101,6 +101,12 @@ function downscaleImage(file: File, maxDim = 1280): Promise<string> {
     img.src = url;
   });
 }
+
+/** Nén một ảnh dataURL (VD: ảnh trích từ PowerPoint) về ≤1280px JPEG. */
+async function downscaleDataUrl(dataUrl: string, maxDim = 1280): Promise<string> {
+  const blob = await (await fetch(dataUrl)).blob();
+  return downscaleImage(new File([blob], 'slide', { type: blob.type || 'image/png' }), maxDim);
+}
 const btnPrimary =
   'flex min-h-[56px] items-center justify-center gap-2 rounded-2xl bg-violet-600 px-4 text-base font-bold text-white disabled:opacity-50';
 const btnSecondary =
@@ -655,7 +661,7 @@ export function SimpleSectionEditor() {
     }
   };
 
-  /** Nhập PowerPoint vào mục giảng: mỗi slide .pptx thành 1 slide chữ (chỉ lấy chữ). */
+  /** Nhập PowerPoint vào mục giảng: mỗi slide .pptx thành 1 slide — có chữ thì lấy chữ, chỉ có hình thì lấy nguyên hình làm nền. */
   const onPickPptx = async (file: File | undefined) => {
     if (!file || !programId || !sectionId) return;
     const MAX_PPTX = 30 * 1024 * 1024;
@@ -666,42 +672,66 @@ export function SimpleSectionEditor() {
     setPptxBusy(true);
     try {
       // Tải lười để code đọc zip không nằm trong gói chính.
-      const { extractPptxSlideTexts } = await import('../export/lib/pptxImport');
-      const { texts, skipped } = await extractPptxSlideTexts(file);
-      if (texts.length === 0) {
-        toast('Không trích được chữ nào từ file PowerPoint này.', 'error');
+      const { extractPptxSlides } = await import('../export/lib/pptxImport');
+      const { slides: found, skipped } = await extractPptxSlides(file);
+      if (found.length === 0) {
+        toast('Không trích được chữ hay ảnh nào từ file PowerPoint này.', 'error');
         return;
       }
-      const imported: SlideDraft[] = texts.map((text, k) => ({
-        objects: [
-          {
-            id: uuid(),
-            type: 'text',
-            x: 8,
-            y: 22,
-            w: 84,
-            h: 60,
-            z: 5,
-            text,
-            fontFamily: 'Arial, sans-serif',
-            fontSize: 40,
-            color: '#ffffff',
-            bold: false,
-            align: 'center',
-            lineHeight: 1.4,
-          },
-        ],
-        background: { ...background },
-        label: `PowerPoint ${k + 1}`,
-      }));
+      const imported: SlideDraft[] = [];
+      let textCount = 0;
+      let imageCount = 0;
+      for (let k = 0; k < found.length; k++) {
+        const s = found[k];
+        // Ảnh slide nén về ≤1280px JPEG cho nhẹ (ảnh gốc trong file có thể nặng hàng MB).
+        let bg = { ...background };
+        if (s.image) {
+          try {
+            bg = { type: 'image', image: await downscaleDataUrl(s.image), overlayOpacity: 0.35 };
+          } catch {
+            bg = { type: 'image', image: s.image, overlayOpacity: 0.35 };
+          }
+          imageCount++;
+        }
+        if (s.text) {
+          textCount++;
+          imported.push({
+            objects: [
+              {
+                id: uuid(),
+                type: 'text',
+                x: 8,
+                y: 22,
+                w: 84,
+                h: 60,
+                z: 5,
+                text: s.text,
+                fontFamily: 'Arial, sans-serif',
+                fontSize: 40,
+                color: '#ffffff',
+                bold: false,
+                align: 'center',
+                lineHeight: 1.4,
+              },
+            ],
+            background: bg,
+            label: `PowerPoint ${k + 1}`,
+          });
+        } else if (s.image) {
+          // Slide chỉ có hình (chữ nằm chết trong hình) → slide hình, không chữ.
+          imported.push({ objects: [], background: bg, label: `PowerPoint ${k + 1}` });
+        }
+      }
       const next = drafts ? [...drafts, ...imported] : imported;
       basesRef.current = next.map((d) => d.objects.map((o) => o.fontSize ?? 0));
       setDraftScales(next.map(() => 1));
       setDrafts(next);
+      const detail: string[] = [];
+      if (textCount > 0) detail.push(`${textCount} slide chữ`);
+      if (imageCount > 0) detail.push(`${imageCount} slide hình`);
+      if (skipped > 0) detail.push(`${skipped} slide trống đã bỏ qua`);
       toast(
-        `Đã nhập ${texts.length} slide từ PowerPoint${
-          skipped > 0 ? ` (${skipped} slide trống đã bỏ qua)` : ''
-        }. Bấm “Lưu nội dung” để lưu.`,
+        `Đã nhập ${imported.length} slide từ PowerPoint (${detail.join(', ')}). Bấm “Lưu nội dung” để lưu.`,
         'success',
       );
     } catch (e) {
@@ -1169,8 +1199,9 @@ export function SimpleSectionEditor() {
               {pptxBusy ? '⏳ Đang đọc file…' : '📊 Nhập PowerPoint (.pptx)'}
             </button>
             <p className="mt-1 text-xs text-slate-500">
-              Mỗi slide PowerPoint thành 1 slide chữ trong mục giảng (chỉ lấy chữ, không
-              lấy ảnh/hiệu ứng) — bấm “Lưu nội dung” để lưu.
+              Mỗi slide PowerPoint thành 1 slide trong mục giảng — slide có chữ thì
+              lấy chữ, slide chỉ có hình thì lấy nguyên hình (nén về ≤1280px) — bấm
+              “Lưu nội dung” để lưu.
             </p>
             <input
               ref={pptxRef}
