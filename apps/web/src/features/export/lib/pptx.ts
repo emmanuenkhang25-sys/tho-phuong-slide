@@ -56,6 +56,26 @@ interface Box {
   h: number;
 }
 
+/**
+ * Thêm ảnh dataURL vào slide PPTX. KHÔNG dùng prop `path` với dataURL:
+ * pptxgenjs tính đuôi file từ `path` bằng cách cắt sau dấu `/` cuối — mà
+ * dataURL đầy dấu `/` trong phần base64 nên đuôi file thành mảnh base64 rác
+ * (VD: image-54-1.9k=, ContentType image/9k=) khiến PowerPoint từ chối mở
+ * file (LibreOffice dễ tính nên vẫn mở được). Dùng prop `data` (bỏ tiền tố
+ * `data:`) để pptxgenjs đọc đúng mime — đúng cách nhánh video đã làm.
+ */
+function addImageFromDataUrl(
+  slide: PptxSlide,
+  dataUrl: string,
+  box: Box,
+): void {
+  if (dataUrl.startsWith('data:')) {
+    slide.addImage({ data: dataUrl.slice('data:'.length), x: box.x, y: box.y, w: box.w, h: box.h });
+  } else {
+    slide.addImage({ path: dataUrl, x: box.x, y: box.y, w: box.w, h: box.h });
+  }
+}
+
 async function applyBackground(
   slide: PptxSlide,
   data: Slide,
@@ -77,7 +97,7 @@ async function applyBackground(
   if (bg.type === 'image' && bg.image) {
     const url = await resolveImageDataUrl(bg.image, churchId);
     if (url) {
-      slide.addImage({ path: url, x: 0, y: 0, w: layout.width, h: layout.height });
+      addImageFromDataUrl(slide, url, { x: 0, y: 0, w: layout.width, h: layout.height });
       warnings.push('Ảnh nền được nhúng phủ kín slide — tỉ lệ co/kéo có thể hơi khác bản gốc.');
     } else {
       slide.background = { color: '1E3A5F' };
@@ -169,7 +189,7 @@ export async function exportPPTX(
       } else if (obj.type === 'image' && obj.src) {
         const url = await resolveImageDataUrl(obj.src, program.church_id);
         if (url) {
-          slide.addImage({ path: url, x: box.x, y: box.y, w: box.w, h: box.h });
+          addImageFromDataUrl(slide, url, box);
         } else {
           warnings.push(`Slide ${slideNo}: bỏ qua một ảnh vì không tải được dữ liệu ảnh.`);
         }
