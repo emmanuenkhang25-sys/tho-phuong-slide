@@ -510,7 +510,8 @@ export function SimpleSectionEditor() {
       res = { title: r.title, slides: scaleDraftFonts(r.slides, fontPreset.fontScale) };
     } else if (editorType === 'bible') {
       const r = splitBible(content, {
-        versesPerSlide: 2,
+        // Mỗi câu Kinh Thánh thành đúng 1 slide (17 câu → 17 slide).
+        versesPerSlide: 1,
         reference: reference.trim() || undefined,
         background,
       });

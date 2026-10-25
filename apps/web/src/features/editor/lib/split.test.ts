@@ -178,6 +178,26 @@ describe('splitBible', () => {
     expect(slides[0].label).toBe('Kinh Thánh');
   });
 
+  it('mỗi câu thành đúng 1 slide (17 câu → 17 slide)', () => {
+    const { slides } = splitBible(BIBLE, { versesPerSlide: 1, reference: 'Giăng 3' });
+    expect(slides).toHaveLength(3);
+    expect(slides[0].label).toBe('Giăng 3 • câu 16');
+    expect(slides[1].label).toBe('Giăng 3 • câu 17');
+    expect(slides[2].label).toBe('Giăng 3 • câu 18');
+    expect(allBodyText([slides[1]])).toContain('17. Hầu cho hễ ai tin Con ấy không bị hư mất.');
+    expect(allBodyText([slides[1]])).not.toContain('18.');
+  });
+
+  it('văn bản không có số câu nhưng nhiều dòng → mỗi dòng 1 slide', () => {
+    const { slides } = splitBible(
+      'Vì Đức Chúa Trời yêu thương thế gian.\nHầu cho hễ ai tin Con ấy không bị hư mất.\nMà được sự sống đời đời.',
+      { versesPerSlide: 1 },
+    );
+    expect(slides).toHaveLength(3);
+    expect(allBodyText([slides[0]])).toContain('Vì Đức Chúa Trời yêu thương thế gian.');
+    expect(allBodyText([slides[2]])).toContain('Mà được sự sống đời đời.');
+  });
+
   it('input rỗng → không có slide', () => {
     expect(splitBible('  \n ').slides).toHaveLength(0);
   });

@@ -307,8 +307,14 @@ function parseVerses(text: string): Verse[] {
   const norm = text.replace(/\r\n?/g, '\n');
   const matches = [...norm.matchAll(VERSE_RE)];
   if (matches.length === 0) {
-    const t = norm.trim();
-    return t ? [{ n: null, text: t }] : [];
+    // Không có số câu: mỗi dòng không rỗng là một câu — đoạn dán từ app
+    // Kinh Thánh không kèm số, hoặc người dùng gõ mỗi câu một dòng.
+    // (Văn bản một dòng duy nhất vẫn là 1 câu như trước.)
+    return norm
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((text) => ({ n: null, text }));
   }
   const verses: Verse[] = [];
   const preamble = norm.slice(0, matches[0].index ?? 0).trim();
