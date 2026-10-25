@@ -173,6 +173,8 @@ const DraftCard = memo(function DraftCard({
   onPatchObject,
   onPatchBody,
   onFontScale,
+  onStepFontSize,
+  fontSizeMode,
   onEditText,
   onToggleEdit,
   onDelete,
@@ -185,6 +187,9 @@ const DraftCard = memo(function DraftCard({
   onPatchObject: (idx: number, objId: string, patch: Partial<SlideObject>) => void;
   onPatchBody: (idx: number, patch: Partial<SlideObject>) => void;
   onFontScale: (idx: number, scale: number) => void;
+  /** Chế độ số (bài hát): tăng/giảm 74–80 thay cho Nhỏ/Vừa/To. */
+  onStepFontSize?: (idx: number, delta: number) => void;
+  fontSizeMode?: 'scale' | 'numeric';
   onEditText: (idx: number, value: string) => void;
   onToggleEdit: (idx: number) => void;
   onDelete: (idx: number) => void;
@@ -216,28 +221,55 @@ const DraftCard = memo(function DraftCard({
         <p className="text-xs font-bold text-slate-500">Slide {i + 1}</p>
         <div className="flex flex-wrap items-center justify-end gap-1">
           <div className="flex items-center gap-1" role="group" aria-label={`Cỡ chữ slide ${i + 1}`}>
-            {(
-              [
-                ['Nhỏ', 0.8],
-                ['Vừa', 1],
-                ['To', 1.25],
-              ] as const
-            ).map(([label, s]) => (
-              <button
-                key={label}
-                type="button"
-                onClick={() => onFontScale(i, s)}
-                aria-pressed={scale === s}
-                className={
-                  'min-h-[36px] rounded-lg border px-2.5 text-xs font-bold ' +
-                  (scale === s
-                    ? 'border-violet-500 bg-violet-500/20 text-violet-200'
-                    : 'border-white/10 text-slate-400')
-                }
-              >
-                {label}
-              </button>
-            ))}
+            {fontSizeMode === 'numeric' ? (
+              <>
+                <button
+                  type="button"
+                  aria-label={`Giảm cỡ chữ slide ${i + 1}`}
+                  onClick={() => onStepFontSize?.(i, -1)}
+                  className="min-h-[36px] min-w-[36px] rounded-lg border border-white/10 px-2 text-sm font-bold text-slate-300"
+                >
+                  −
+                </button>
+                <span className="min-w-[32px] text-center text-sm font-bold text-white">
+                  {(() => {
+                    const b = bodyObjOf(d.objects);
+                    return b?.fontSize != null ? Math.round(b.fontSize) : '—';
+                  })()}
+                </span>
+                <button
+                  type="button"
+                  aria-label={`Tăng cỡ chữ slide ${i + 1}`}
+                  onClick={() => onStepFontSize?.(i, 1)}
+                  className="min-h-[36px] min-w-[36px] rounded-lg border border-white/10 px-2 text-sm font-bold text-slate-300"
+                >
+                  +
+                </button>
+              </>
+            ) : (
+              (
+                [
+                  ['Nhỏ', 0.8],
+                  ['Vừa', 1],
+                  ['To', 1.25],
+                ] as const
+              ).map(([label, s]) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => onFontScale(i, s)}
+                  aria-pressed={scale === s}
+                  className={
+                    'min-h-[36px] rounded-lg border px-2.5 text-xs font-bold ' +
+                    (scale === s
+                      ? 'border-violet-500 bg-violet-500/20 text-violet-200'
+                      : 'border-white/10 text-slate-400')
+                  }
+                >
+                  {label}
+                </button>
+              ))
+            )}
           </div>
           <button
             type="button"
@@ -340,6 +372,8 @@ export function SimpleSectionEditor() {
   const [sermonTopic, setSermonTopic] = useState('');
   const [sermonVerse, setSermonVerse] = useState('');
   const [fontPresetId, setFontPresetId] = useState<'vua' | 'to' | 'cuc-to'>('vua');
+  /** Cỡ chữ bài hát: nhỏ nhất 74, tăng được tới 80 (thay cho kiểu chọn Nhỏ/Vừa/To). */
+  const [lyricsFontSize, setLyricsFontSize] = useState(74);
 
   const [drafts, setDrafts] = useState<SlideDraft[] | null>(null);
   const [draftScales, setDraftScales] = useState<number[]>([]);
@@ -505,15 +539,15 @@ export function SimpleSectionEditor() {
     let res: { title?: string; slides: SlideDraft[] };
     if (editorType === 'lyrics') {
       const r = splitLyrics(content, {
-        // Slide bài hát tối đa 3 dòng HIỂN THỊ — preset nào cũng không vượt quá.
-        linesPerSlide: Math.min(fontPreset.linesPerSlide, 3),
-        // Truyền hệ số cỡ chữ để bộ chia ước tính đúng quấn dòng.
-        fontScale: fontPreset.fontScale,
+        // Slide bài hát tối đa 3 dòng HIỂN THỊ.
+        linesPerSlide: 3,
+        // Cỡ chữ số do người dùng chọn (74–80) — đã là cỡ cuối, không nhân thêm hệ số.
+        fontSize: lyricsFontSize,
         // Chỉ tên bài hát do người dùng nhập mới lên slide — không tự gắn tên mục.
         title: songTitle.trim() || undefined,
         background,
       });
-      res = { title: r.title, slides: scaleDraftFonts(r.slides, fontPreset.fontScale) };
+      res = { title: r.title, slides: r.slides };
     } else if (editorType === 'bible') {
       const r = splitBible(content, {
         // Mỗi câu Kinh Thánh thành đúng 1 slide (17 câu → 17 slide).
@@ -586,6 +620,25 @@ export function SimpleSectionEditor() {
             const base = bases[j] ?? 0;
             if (o.type !== 'text' || base <= 0) return o;
             return { ...o, fontSize: Math.max(10, Math.round(base * scale)) };
+          }),
+        };
+      });
+    });
+  }, []);
+
+  /** Tăng/giảm cỡ chữ số của 1 slide bài hát (74–80), chỉ đổi object thân bài lớn nhất. */
+  const stepDraftFontSize = useCallback((idx: number, delta: number) => {
+    setDrafts((prev) => {
+      if (!prev) return prev;
+      return prev.map((d, i) => {
+        if (i !== idx) return d;
+        const body = bodyObjOf(d.objects);
+        if (!body) return d;
+        return {
+          ...d,
+          objects: d.objects.map((o) => {
+            if (o.id !== body.id || o.type !== 'text' || !o.fontSize) return o;
+            return { ...o, fontSize: Math.min(80, Math.max(74, o.fontSize + delta)) };
           }),
         };
       });
@@ -1070,7 +1123,35 @@ export function SimpleSectionEditor() {
           </>
         )}
 
-        {(editorType === 'lyrics' || editorType === 'bible') && (
+        {editorType === 'lyrics' && (
+          <div className="mb-3">
+            <label className={labelCls}>Cỡ chữ bài hát (nhỏ nhất 74, tối đa 80)</label>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                aria-label="Giảm cỡ chữ bài hát"
+                onClick={() => setLyricsFontSize((v) => Math.max(74, v - 1))}
+                className="min-h-[48px] min-w-[48px] rounded-xl border border-white/10 text-xl font-bold text-slate-300"
+              >
+                −
+              </button>
+              <span className="min-w-[56px] text-center text-2xl font-bold text-white">{lyricsFontSize}</span>
+              <button
+                type="button"
+                aria-label="Tăng cỡ chữ bài hát"
+                onClick={() => setLyricsFontSize((v) => Math.min(80, v + 1))}
+                className="min-h-[48px] min-w-[48px] rounded-xl border border-white/10 text-xl font-bold text-slate-300"
+              >
+                +
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-slate-500">
+              Chữ to, in đậm, chiếm nhiều màn hình — đọc rõ cho cả trẻ em và người già.
+            </p>
+          </div>
+        )}
+
+        {editorType === 'bible' && (
           <div className="mb-3">
             <label className={labelCls}>Cỡ chữ slide</label>
             <div className="flex gap-2">
@@ -1241,6 +1322,8 @@ export function SimpleSectionEditor() {
                 onPatchObject={patchDraftObject}
                 onPatchBody={patchDraftBody}
                 onFontScale={setDraftFontScale}
+                onStepFontSize={stepDraftFontSize}
+                fontSizeMode={editorType === 'lyrics' ? 'numeric' : 'scale'}
                 onEditText={editDraftText}
                 onToggleEdit={toggleEdit}
                 onDelete={deleteDraft}

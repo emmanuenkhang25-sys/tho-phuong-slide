@@ -119,6 +119,20 @@ describe('splitLyrics', () => {
   it('input rỗng → không có slide', () => {
     expect(splitLyrics('   \n\n  ').slides).toHaveLength(0);
   });
+
+  it('cỡ chữ số 74: thân bài đúng 74, in đậm, mặc định vẫn 40 khi không truyền fontSize', () => {
+    const input = 'Dòng lời một.\nDòng lời hai.';
+    const s74 = splitLyrics(input, { autoTitle: false, fontSize: 74 });
+    const body74 = s74.slides[0].objects.find((o) => o.type === 'text' && (o.text ?? '').includes('Dòng lời một'));
+    expect(body74?.fontSize).toBe(74);
+    expect(body74?.bold).toBe(true);
+    const s80 = splitLyrics(input, { autoTitle: false, fontSize: 80 });
+    const body80 = s80.slides[0].objects.find((o) => o.type === 'text' && (o.text ?? '').includes('Dòng lời một'));
+    expect(body80?.fontSize).toBe(80);
+    const sDef = splitLyrics(input, { autoTitle: false });
+    const bodyDef = sDef.slides[0].objects.find((o) => o.type === 'text' && (o.text ?? '').includes('Dòng lời một'));
+    expect(bodyDef?.fontSize).toBe(40);
+  });
 });
 
 describe('splitBible', () => {

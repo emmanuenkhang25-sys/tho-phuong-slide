@@ -108,6 +108,8 @@ function ObjectView({
     grabY: number;
     w: number;
     h: number;
+    /** Khoảng từ mép trên khung tới mép trên glyph (nửa giãn dòng đầu) — để hút giữa theo tâm glyph thật. */
+    insetY: number;
     lastX: number;
     lastY: number;
   } | null>(null);
@@ -193,13 +195,23 @@ function ObjectView({
         /* không bắt được pointer thì vẫn kéo chừng nào ngón tay còn trên chữ */
       }
       // Giữ nguyên khoảng cách ngón tay — mép khung sát chữ để chữ không nhảy.
+      // LƯU Ý: top khung giữ nguyên vị trí hiện tại (elTop), KHÔNG nhảy về m.y
+      // (mép glyph): trước đây khung nhảy xuống một khoảng nửa giãn dòng mỗi lần
+      // chạm, khiến tâm khung lệch khỏi tâm slide đúng khoảng đó khi chữ to.
+      // grabY tính từ mép khung (elTop) để vị trí ngón tay khớp với khung thấy được;
+      // insetY riêng để đường gióng/hút giữa vẫn tính theo tâm glyph thật.
+      const elTop = Math.min(
+        Math.max(0, ((el.getBoundingClientRect().top - m.slideRect.top) / m.slideRect.height) * 100),
+        Math.max(0, 100 - m.h),
+      );
+      const insetY = Math.max(0, m.y - elTop);
       // Đổi trực tiếp trên DOM (không qua state) để kéo mượt, không re-render.
       el.style.left = `${nx}%`;
-      el.style.top = `${m.y}%`;
+      el.style.top = `${elTop}%`;
       el.style.width = `${nw}%`;
       el.style.height = `${m.h}%`;
-      dragRef.current = { grabX: px - nx, grabY: py - m.y, w: nw, h: m.h, lastX: nx, lastY: m.y };
-      onDragGuide?.({ cx: nx + nw / 2, cy: m.y + m.h / 2 });
+      dragRef.current = { grabX: px - nx, grabY: py - elTop, w: nw, h: m.h, insetY, lastX: nx, lastY: elTop };
+      onDragGuide?.({ cx: nx + nw / 2, cy: elTop + insetY + m.h / 2 });
     };
     const onPointerMove = (e: ReactPointerEvent) => {
       const st = dragRef.current;
@@ -210,16 +222,21 @@ function ObjectView({
       const px = ((e.clientX - slideRect.left) / slideRect.width) * 100;
       const py = ((e.clientY - slideRect.top) / slideRect.height) * 100;
       let nx = Math.min(Math.max(0, px - st.grabX), Math.max(0, 100 - st.w));
-      let ny = Math.min(Math.max(0, py - st.grabY), Math.max(0, 100 - st.h));
+      // Kẹp theo hộp glyph thật (mép glyph không ra ngoài slide), không theo mép khung.
+      let ny = Math.min(
+        Math.max(-st.insetY, py - st.grabY),
+        Math.max(-st.insetY, 100 - st.insetY - st.h),
+      );
       // Hút vào chính giữa slide khi đã gần giữa — đường gióng sẽ đậm lên.
+      // Tâm glyph thật = top khung + insetY + nửa chiều cao glyph.
       let cx = nx + st.w / 2;
-      let cy = ny + st.h / 2;
+      let cy = ny + st.insetY + st.h / 2;
       if (Math.abs(cx - 50) <= SNAP_PCT) {
         nx = 50 - st.w / 2;
         cx = 50;
       }
       if (Math.abs(cy - 50) <= SNAP_PCT) {
-        ny = 50 - st.h / 2;
+        ny = 50 - st.insetY - st.h / 2;
         cy = 50;
       }
       // Chỉ đổi DOM, không setState — thả tay mới lưu (onPointerEnd).

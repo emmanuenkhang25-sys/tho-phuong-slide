@@ -28,6 +28,8 @@ export interface SplitLyricsOptions {
   linesPerSlide?: number;
   /** Hệ số cỡ chữ so với gốc 40px (preset Vừa=1, To=1.25, Cực to=1.5) — dùng để ước tính quấn dòng. */
   fontScale?: number;
+  /** Cỡ chữ thân bài tuyệt đối (ưu tiên hơn fontScale; trình sửa bài hát dùng 74–80). */
+  fontSize?: number;
   /** Tiêu đề bài hát (hiển thị nhỏ trên mỗi slide). */
   title?: string;
   /** Tự lấy dòng đơn đầu tiên làm tiêu đề (mặc định true). */
@@ -86,13 +88,13 @@ function makeLabelObject(text: string): SplitSlideObject {
   };
 }
 
-function makeBodyObject(text: string, opts: { fontSize?: number; top?: number; chorus?: boolean } = {}): SplitSlideObject {
+function makeBodyObject(text: string, opts: { fontSize?: number; top?: number; chorus?: boolean; bold?: boolean; lineHeight?: number } = {}): SplitSlideObject {
   return {
     id: genId('obj'), type: 'text',
     x: 6, y: opts.top ?? 22, w: 88, h: 72, z: 5,
     text, fontFamily: 'Arial, sans-serif', fontSize: opts.fontSize ?? 40,
-    color: '#ffffff', bold: false, italic: false,
-    align: 'center', lineHeight: 1.6,
+    color: '#ffffff', bold: opts.bold ?? false, italic: false,
+    align: 'center', lineHeight: opts.lineHeight ?? 1.6,
     chorus: opts.chorus ? true : undefined,
   };
 }
@@ -151,11 +153,11 @@ function parseSegments(text: string): LyricSegment[] {
  * (cùng câu), thì đẩy cả dòng lời đó sang cụm sau — nhưng mỗi cụm giữ lại
  * ít nhất ceil(maxVisual/2) dòng hiển thị.
  */
-function chunkVisualLines(lines: string[], maxVisual: number, fontSize: number): string[][] {
+function chunkVisualLines(lines: string[], maxVisual: number, fontSize: number, charFactor = 0.55): string[][] {
   // Hộp thân bài ở slide chuẩn 960px: x=6%, w=88% → rộng 844.8px.
   const boxWidth = 960 * 0.88;
-  // Rộng trung bình 1 ký tự ≈ 0.55 × cỡ chữ (hơi dư để khóa chặt, tránh tràn).
-  const charsPerLine = Math.max(1, Math.floor(boxWidth / (fontSize * 0.55)));
+  // Rộng trung bình 1 ký tự ≈ charFactor × cỡ chữ (hơi dư để khóa chặt, tránh tràn).
+  const charsPerLine = Math.max(1, Math.floor(boxWidth / (fontSize * charFactor)));
 
   // Cắt 1 dòng lời thành các dòng hiển thị (theo từ, từ quá dài tự cắt).
   const wrapLine = (line: string): string[] => {
@@ -238,8 +240,8 @@ export function splitLyrics(
   opts: SplitLyricsOptions = {},
 ): { title?: string; slides: SlideDraft[] } {
   const maxVisualLines = Math.max(1, Math.floor(opts.linesPerSlide ?? 3));
-  // Cỡ chữ thân bài hiệu dụng (gốc 40px × hệ số preset) — để ước tính quấn dòng.
-  const effFontSize = 40 * (opts.fontScale ?? 1);
+  // Cỡ chữ thân bài hiệu dụng: fontSize tuyệt đối nếu có, không thì gốc 40px × hệ số preset.
+  const effFontSize = opts.fontSize ?? 40 * (opts.fontScale ?? 1);
   const background = opts.background ?? defaultSplitBackground();
   const showLabels = opts.showSectionLabels !== false;
   const highlight = opts.highlightChorus !== false;
@@ -262,7 +264,8 @@ export function splitLyrics(
   let verseNo = 0;
   const buildSlides = (seg: LyricSegment): SlideDraft[] => {
     const segNo = seg.chorus ? 0 : ++verseNo;
-    const chunks = chunkVisualLines(seg.lines, maxVisualLines, effFontSize);
+    // Chữ đậm nên đo quấn dòng với hệ số rộng hơn (0.60) để không tràn.
+    const chunks = chunkVisualLines(seg.lines, maxVisualLines, effFontSize, 0.6);
     return chunks.map((chunk, ci) => {
       const objects: SplitSlideObject[] = [];
       if (title) objects.push(makeTitleObject(title));
@@ -271,6 +274,10 @@ export function splitLyrics(
         makeBodyObject(chunk.join('\n'), {
           top: title ? 22 : 12,
           chorus: highlight && seg.chorus,
+          // Lời bài hát: chữ to, in đậm cho người già và trẻ em đọc rõ.
+          fontSize: effFontSize,
+          bold: true,
+          lineHeight: 1.5,
         }),
       );
       const multi = chunks.length > 1 ? ` (${ci + 1}/${chunks.length})` : '';
