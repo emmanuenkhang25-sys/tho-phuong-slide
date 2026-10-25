@@ -125,10 +125,16 @@ export function SimpleProgramPage() {
     next[index] = { ...b, order_index: index };
     next[j] = { ...a, order_index: j };
     setSections(next);
-    const { error } = await supabase.from('sections').upsert([
-      { id: a.id, order_index: j },
-      { id: b.id, order_index: index },
+    // Dùng update từng dòng (không dùng upsert): upsert chỉ gửi {id,
+    // order_index} nên dòng mới thiếu program_id → luật sections_insert kiểm
+    // tra hội thánh qua program_id bị rỗng và từ chối ("new row violates
+    // row-level security policy"). Update chỉ kiểm tra quyền trên dòng cũ
+    // nên chạy đúng. Hai dòng khác nhau nên cập nhật song song được.
+    const results = await Promise.all([
+      supabase.from('sections').update({ order_index: j }).eq('id', a.id),
+      supabase.from('sections').update({ order_index: index }).eq('id', b.id),
     ]);
+    const error = results.find((r) => r.error)?.error;
     if (error) {
       toast(`Đổi thứ tự lỗi: ${error.message}`, 'error');
       void reloadSections();
@@ -182,7 +188,10 @@ export function SimpleProgramPage() {
         program_id: id,
         title: 'Tôn vinh Chúa',
         kind: 'ton-vinh-chua',
-        order_index: sections.length,
+        // Số thứ tự = lớn nhất hiện có + 1 (không dùng sections.length vì sau
+        // khi xóa mục sẽ còn khoảng trống gây trùng số thứ tự).
+        order_index:
+          sections.length > 0 ? Math.max(...sections.map((s) => s.order_index)) + 1 : 0,
       });
       if (error) throw new Error(`Thêm bài hát lỗi: ${error.message}`);
       navigate(`/p/${id}/muc/${newId}`);
@@ -205,7 +214,8 @@ export function SimpleProgramPage() {
       program_id: id,
       title: newName.trim(),
       kind: newKind,
-      order_index: sections.length,
+      order_index:
+        sections.length > 0 ? Math.max(...sections.map((s) => s.order_index)) + 1 : 0,
     };
     const { error } = await supabase.from('sections').insert(row);
     setBusy(false);
