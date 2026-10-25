@@ -30,9 +30,12 @@ import { duplicateSimpleSection } from './programApi';
 import {
   fetchLibraryItems,
   findLibraryProgram,
-  foldVi,
+  matchLibraryItems,
+  saveSectionToLibrary,
   type LibraryItem,
 } from './library';
+import { pushUndo, type UndoEntry } from './undoStore';
+import { useAuth } from '../../stores/auth';
 
 /** Object text có cỡ chữ lớn nhất trong slide (phần "thân bài"). */
 function biggestText(slide: { content: { objects: SlideObject[] } }): SlideObject | undefined {
@@ -357,6 +360,7 @@ export function SimpleSectionEditor() {
   const { id: programId, sectionId } = useParams<{ id: string; sectionId: string }>();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const [program, setProgram] = useState<Program | null>(null);
   const [section, setSection] = useState<Section | null>(null);
@@ -379,6 +383,62 @@ export function SimpleSectionEditor() {
   const [draftScales, setDraftScales] = useState<number[]>([]);
   /** Cỡ chữ gốc của từng object trong bản nháp — để chỉnh cỡ từng slide luôn tính từ gốc. */
   const basesRef = useRef<number[][]>([]);
+  /**
+   * Gương của bản nháp qua ref (cập nhật sau mỗi lần render) — để các handler
+   * useCallback (không thấy state mới) vẫn chụp đúng bản nháp TRƯỚC khi đổi,
+   * làm đầu vào cho mục hoàn tác.
+   */
+  const draftsRef = useRef<SlideDraft[] | null>(null);
+  const scalesRef = useRef<number[]>([]);
+  useEffect(() => {
+    draftsRef.current = drafts;
+  }, [drafts]);
+  useEffect(() => {
+    scalesRef.current = draftScales;
+  }, [draftScales]);
+  /** Bản nháp + trạng thái liên quan tại một thời điểm — để hoàn tác khôi phục lại. */
+  interface DraftSnap {
+    drafts: SlideDraft[] | null;
+    scales: number[];
+    bases: number[][];
+    customBg?: SlideBackground | null;
+    content?: string;
+    songTitle?: string;
+    reference?: string;
+  }
+  const snapshotDrafts = (extras?: Partial<DraftSnap>): DraftSnap => ({
+    drafts: draftsRef.current
+      ? draftsRef.current.map((d) => ({ ...d, objects: d.objects.map((o) => ({ ...o })) }))
+      : null,
+    scales: [...scalesRef.current],
+    bases: basesRef.current.map((b) => [...b]),
+    ...extras,
+  });
+  const restoreDraftSnap = (snap: DraftSnap) => {
+    basesRef.current = snap.bases.map((b) => [...b]);
+    setDraftScales([...snap.scales]);
+    setDrafts(
+      snap.drafts
+        ? snap.drafts.map((d) => ({ ...d, objects: d.objects.map((o) => ({ ...o })) }))
+        : null,
+    );
+    if (snap.customBg !== undefined) setCustomBg(snap.customBg);
+    if (snap.content !== undefined) setContent(snap.content);
+    if (snap.songTitle !== undefined) setSongTitle(snap.songTitle);
+    if (snap.reference !== undefined) setReference(snap.reference);
+    setEditingIdx(null);
+  };
+  /**
+   * Đẩy mục hoàn tác của trình sửa. Ngoài mục hoàn tác chính, mọi thao tác đều
+   * hủy bản ghi sửa chữ đang chờ (tránh khôi phục nhầm về trạng thái cũ hơn).
+   */
+  const editSnapRef = useRef<{ snap: DraftSnap } | null>(null);
+  const editDirtyRef = useRef(false);
+  const pushEditorUndo = (entry: UndoEntry) => {
+    editSnapRef.current = null;
+    editDirtyRef.current = false;
+    pushUndo(entry);
+  };
   const [customBg, setCustomBg] = useState<SlideBackground | null>(null);
   const [bgBusy, setBgBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -479,12 +539,8 @@ export function SimpleSectionEditor() {
   /** Từ khóa đang gõ để tìm trong Thư viện (tên bài hát / tham chiếu). */
   const libQuery = editorType === 'lyrics' ? songTitle : editorType === 'bible' ? reference : '';
   const libMatches = useMemo(() => {
-    if (!libItems || libQuery.trim() === '') return [];
-    const q = foldVi(libQuery.trim());
-    const want = editorType === 'lyrics' ? 'lyrics' : 'bible';
-    return libItems
-      .filter((it) => it.kind === want && foldVi(it.matchText).includes(q))
-      .slice(0, 6);
+    if (!libItems) return [];
+    return matchLibraryItems(libItems, libQuery, editorType === 'lyrics' ? 'lyrics' : 'bible');
   }, [libItems, libQuery, editorType]);
 
   /**
@@ -492,6 +548,7 @@ export function SimpleSectionEditor() {
    * màu, vị trí chữ) thành bản nháp — bấm “Lưu nội dung” là vào chương trình.
    */
   const insertLibraryItem = (item: LibraryItem) => {
+    const snap = snapshotDrafts({ content, songTitle, reference });
     const fromLib: SlideDraft[] = item.slides.map((s) => ({
       objects: s.content.objects.map((o) => ({ ...o, id: uuid() })),
       background: s.background,
@@ -513,6 +570,12 @@ export function SimpleSectionEditor() {
     }
     setContent(bodies);
     setLibOpen(false);
+    pushEditorUndo({
+      label: `Chèn từ thư viện “${item.displayTitle}”`,
+      run: async () => {
+        restoreDraftSnap(snap);
+      },
+    });
     toast(
       `Đã chèn “${item.displayTitle}” (${fromLib.length} slide). Bấm “Lưu nội dung” để lưu.`,
       'success',
@@ -523,6 +586,7 @@ export function SimpleSectionEditor() {
   const generateSlides = () => {
     // Không nhập gì vẫn tạo được 1 slide chỉ có ảnh nền — có những slide chỉ
     // cần chiếu một bức ảnh đã đủ thông tin, không cần thêm chữ.
+    const snap = snapshotDrafts();
     const hasContent =
       content.trim() !== '' || (editorType === 'sermon' && sermonTopic.trim() !== '');
     if (!hasContent) {
@@ -533,6 +597,12 @@ export function SimpleSectionEditor() {
       setDraftScales([1]);
       setDrafts(fresh);
       setEditingIdx(null);
+      pushEditorUndo({
+        label: 'Tạo slide ảnh nền',
+        run: async () => {
+          restoreDraftSnap(snap);
+        },
+      });
       toast('Đã tạo 1 slide chỉ có ảnh nền. Bấm “Lưu nội dung” để lưu.', 'success');
       return;
     }
@@ -602,6 +672,12 @@ export function SimpleSectionEditor() {
     setDraftScales(fresh.map(() => 1));
     setDrafts(fresh);
     setEditingIdx(null);
+    pushEditorUndo({
+      label: `Tạo ${fresh.length} slide`,
+      run: async () => {
+        restoreDraftSnap(snap);
+      },
+    });
     toast(`Đã tạo ${res.slides.length} slide. Bấm “Lưu nội dung” để lưu.`, 'success');
   };
 
@@ -609,6 +685,9 @@ export function SimpleSectionEditor() {
   const setDraftFontScale = useCallback((idx: number, scale: number) => {
     const bases = basesRef.current[idx];
     if (!bases) return;
+    // Bấm đúng cỡ đang dùng thì không đổi gì — không đẩy mục hoàn tác thừa.
+    if ((scalesRef.current[idx] ?? 1) === scale) return;
+    const snap = snapshotDrafts();
     setDraftScales((prev) => prev.map((s, i) => (i === idx ? scale : s)));
     setDrafts((prev) => {
       if (!prev) return prev;
@@ -624,24 +703,41 @@ export function SimpleSectionEditor() {
         };
       });
     });
+    pushEditorUndo({
+      label: 'Đổi cỡ chữ slide',
+      run: async () => {
+        restoreDraftSnap(snap);
+      },
+    });
   }, []);
 
   /** Tăng/giảm cỡ chữ số của 1 slide bài hát (74–80), chỉ đổi object thân bài lớn nhất. */
   const stepDraftFontSize = useCallback((idx: number, delta: number) => {
+    const cur = draftsRef.current?.[idx];
+    const body = cur ? bodyObjOf(cur.objects) : undefined;
+    // Đã kịch trần/sàn (VD bấm + khi đang 80) thì không đổi gì — không đẩy mục thừa.
+    if (!body?.fontSize || Math.min(80, Math.max(74, body.fontSize + delta)) === body.fontSize) return;
+    const snap = snapshotDrafts();
     setDrafts((prev) => {
       if (!prev) return prev;
       return prev.map((d, i) => {
         if (i !== idx) return d;
-        const body = bodyObjOf(d.objects);
-        if (!body) return d;
+        const b = bodyObjOf(d.objects);
+        if (!b) return d;
         return {
           ...d,
           objects: d.objects.map((o) => {
-            if (o.id !== body.id || o.type !== 'text' || !o.fontSize) return o;
+            if (o.id !== b.id || o.type !== 'text' || !o.fontSize) return o;
             return { ...o, fontSize: Math.min(80, Math.max(74, o.fontSize + delta)) };
           }),
         };
       });
+    });
+    pushEditorUndo({
+      label: 'Đổi cỡ chữ slide',
+      run: async () => {
+        restoreDraftSnap(snap);
+      },
     });
   }, []);
 
@@ -652,12 +748,21 @@ export function SimpleSectionEditor() {
     try {
       const dataUrl = await downscaleImage(file);
       const bg: SlideBackground = { type: 'image', image: dataUrl, overlayOpacity: 0.35 };
+      const prevBg = customBg;
+      const snap = snapshotDrafts({ customBg: prevBg });
       setCustomBg(bg);
       if (drafts) {
         setDrafts(drafts.map((d) => ({ ...d, background: bg })));
+        pushEditorUndo({
+          label: 'Đổi ảnh nền',
+          run: async () => {
+            restoreDraftSnap(snap);
+          },
+        });
         toast('Đã đổi ảnh nền cho bản nháp — bấm “Lưu nội dung” để lưu.', 'success');
       } else if (slides.length > 0) {
         const ordered = [...slides].sort((a, b) => a.order_index - b.order_index);
+        const prevBgs = ordered.map((s) => ({ id: s.id, background: s.background }));
         await Promise.all(
           ordered.map((s) =>
             supabase
@@ -670,8 +775,37 @@ export function SimpleSectionEditor() {
           ),
         );
         setSlides(ordered.map((s) => ({ ...s, background: bg })));
+        pushEditorUndo({
+          label: 'Đổi ảnh nền',
+          run: async () => {
+            await Promise.all(
+              prevBgs.map((p) =>
+                supabase
+                  .from('slides')
+                  .update({ background: p.background })
+                  .eq('id', p.id)
+                  .then(({ error }) => {
+                    if (error) throw new Error(`Hoàn tác nền lỗi: ${error.message}`);
+                  }),
+              ),
+            );
+            setSlides((prev) =>
+              prev.map((s) => {
+                const p = prevBgs.find((x) => x.id === s.id);
+                return p ? { ...s, background: p.background } : s;
+              }),
+            );
+            setCustomBg(prevBg);
+          },
+        });
         toast(`Đã đổi ảnh nền cho ${ordered.length} slide.`, 'success');
       } else {
+        pushEditorUndo({
+          label: 'Đặt ảnh nền',
+          run: async () => {
+            setCustomBg(prevBg);
+          },
+        });
         toast('Đã đặt ảnh nền — sẽ dùng khi bấm “Tự động tạo slide”.', 'success');
       }
     } catch (e) {
@@ -702,10 +836,17 @@ export function SimpleSectionEditor() {
         background: { ...background },
         label: 'Video',
       };
+      const snap = snapshotDrafts();
       const next = drafts ? [...drafts, videoSlide] : [videoSlide];
       basesRef.current = next.map((d) => d.objects.map((o) => o.fontSize ?? 0));
       setDraftScales(next.map(() => 1));
       setDrafts(next);
+      pushEditorUndo({
+        label: 'Thêm slide video',
+        run: async () => {
+          restoreDraftSnap(snap);
+        },
+      });
       toast('Đã thêm slide video. Bấm “Lưu nội dung” để lưu.', 'success');
     } catch {
       toast('Không đọc được file video.', 'error');
@@ -775,10 +916,17 @@ export function SimpleSectionEditor() {
           imported.push({ objects: [], background: bg, label: `PowerPoint ${k + 1}` });
         }
       }
+      const snap = snapshotDrafts();
       const next = drafts ? [...drafts, ...imported] : imported;
       basesRef.current = next.map((d) => d.objects.map((o) => o.fontSize ?? 0));
       setDraftScales(next.map(() => 1));
       setDrafts(next);
+      pushEditorUndo({
+        label: 'Nhập PowerPoint',
+        run: async () => {
+          restoreDraftSnap(snap);
+        },
+      });
       const detail: string[] = [];
       if (textCount > 0) detail.push(`${textCount} slide chữ`);
       if (imageCount > 0) detail.push(`${imageCount} slide hình`);
@@ -797,9 +945,17 @@ export function SimpleSectionEditor() {
   /** Về nền mặc định (nền đen). */
   const resetBackground = async () => {
     if (!programId || !sectionId) return;
+    const prevBg = customBg;
+    const snap = snapshotDrafts({ customBg: prevBg });
     setCustomBg(null);
     if (drafts) {
       setDrafts(drafts.map((d) => ({ ...d, background: defaultSectionBg })));
+      pushEditorUndo({
+        label: 'Về nền mặc định',
+        run: async () => {
+          restoreDraftSnap(snap);
+        },
+      });
       toast('Đã về nền mặc định cho bản nháp.', 'success');
       return;
     }
@@ -807,6 +963,7 @@ export function SimpleSectionEditor() {
       setBgBusy(true);
       try {
         const ordered = [...slides].sort((a, b) => a.order_index - b.order_index);
+        const prevBgs = ordered.map((s) => ({ id: s.id, background: s.background }));
         await Promise.all(
           ordered.map((s) =>
             supabase
@@ -819,6 +976,29 @@ export function SimpleSectionEditor() {
           ),
         );
         setSlides(ordered.map((s) => ({ ...s, background: defaultSectionBg })));
+        pushEditorUndo({
+          label: 'Về nền mặc định',
+          run: async () => {
+            await Promise.all(
+              prevBgs.map((p) =>
+                supabase
+                  .from('slides')
+                  .update({ background: p.background })
+                  .eq('id', p.id)
+                  .then(({ error }) => {
+                    if (error) throw new Error(`Hoàn tác nền lỗi: ${error.message}`);
+                  }),
+              ),
+            );
+            setSlides((prev) =>
+              prev.map((s) => {
+                const p = prevBgs.find((x) => x.id === s.id);
+                return p ? { ...s, background: p.background } : s;
+              }),
+            );
+            setCustomBg(prevBg);
+          },
+        });
         toast('Đã về nền mặc định.', 'success');
       } catch (e) {
         toast((e as Error).message, 'error');
@@ -828,8 +1008,80 @@ export function SimpleSectionEditor() {
     }
   };
 
+  /** Đổi thuộc tính của object thân bài trong bản nháp (dùng cho đổi màu). */
+  const patchDraftBody = useCallback((idx: number, patch: Partial<SlideObject>) => {
+    const cur = draftsRef.current?.[idx];
+    const body = cur ? bodyObjOf(cur.objects) : undefined;
+    // Màu đang dùng đã đúng màu bấm thì không đổi gì — không đẩy mục thừa.
+    if (!body || (Object.keys(patch) as (keyof SlideObject)[]).every((k) => body[k] === patch[k])) return;
+    const snap = snapshotDrafts();
+    setDrafts((prev) => {
+      if (!prev) return prev;
+      return prev.map((d, i) => {
+        if (i !== idx) return d;
+        const b = bodyObjOf(d.objects);
+        if (!b) return d;
+        return { ...d, objects: d.objects.map((o) => (o.id === b.id ? { ...o, ...patch } : o)) };
+      });
+    });
+    pushEditorUndo({
+      label: 'Đổi màu chữ',
+      run: async () => {
+        restoreDraftSnap(snap);
+      },
+    });
+  }, []);
+
+  /** Đổi thuộc tính của một object bất kỳ trong bản nháp (dùng cho kéo chữ trực tiếp). */
+  const patchDraftObject = useCallback((idx: number, objId: string, patch: Partial<SlideObject>) => {
+    const cur = draftsRef.current?.[idx];
+    const obj = cur?.objects.find((o) => o.id === objId);
+    // Chạm mà không kéo (thả đúng chỗ cũ) thì không đổi gì — không đẩy mục thừa.
+    if (!obj || (Object.keys(patch) as (keyof SlideObject)[]).every((k) => obj[k] === patch[k])) return;
+    const snap = snapshotDrafts();
+    setDrafts((prev) => {
+      if (!prev) return prev;
+      return prev.map((d, i) => {
+        if (i !== idx) return d;
+        return { ...d, objects: d.objects.map((o) => (o.id === objId ? { ...o, ...patch } : o)) };
+      });
+    });
+    pushEditorUndo({
+      label: 'Kéo chữ',
+      run: async () => {
+        restoreDraftSnap(snap);
+      },
+    });
+  }, []);
+
+  /**
+   * Sửa chữ tại chỗ: mỗi lần gõ chỉ đánh dấu “đã sửa”, KHÔNG đẩy mục hoàn tác
+   * (gõ 1 chữ mà đẩy 1 mục thì thanh Hoàn tác nhấp nháy vô ích). Khi đóng ô
+   * sửa (toggleEdit), cả đợt gõ được chốt thành đúng 1 mục hoàn tác.
+   */
+  const editingIdxRef = useRef<number | null>(null);
+  useEffect(() => {
+    editingIdxRef.current = editingIdx;
+  }, [editingIdx]);
+  const flushTextEditUndo = () => {
+    const stashed = editSnapRef.current;
+    editSnapRef.current = null;
+    if (stashed && editDirtyRef.current) {
+      editDirtyRef.current = false;
+      pushUndo({
+        label: 'Sửa chữ slide',
+        run: async () => {
+          restoreDraftSnap(stashed.snap);
+        },
+      });
+    } else {
+      editDirtyRef.current = false;
+    }
+  };
+
   /** Sửa chữ của slide thứ i trong bản xem trước (chỉ sửa object thân bài). */
   const editDraftText = useCallback((idx: number, value: string) => {
+    editDirtyRef.current = true;
     setDrafts((prev) => {
       if (!prev) return prev;
       return prev.map((d, i) => {
@@ -848,32 +1100,14 @@ export function SimpleSectionEditor() {
     });
   }, []);
 
-  /** Đổi thuộc tính của object thân bài trong bản nháp (dùng cho kéo-thả, đổi màu). */
-  const patchDraftBody = useCallback((idx: number, patch: Partial<SlideObject>) => {
-    setDrafts((prev) => {
-      if (!prev) return prev;
-      return prev.map((d, i) => {
-        if (i !== idx) return d;
-        const body = bodyObjOf(d.objects);
-        if (!body) return d;
-        return { ...d, objects: d.objects.map((o) => (o.id === body.id ? { ...o, ...patch } : o)) };
-      });
-    });
-  }, []);
-
-  /** Đổi thuộc tính của một object bất kỳ trong bản nháp (dùng cho kéo chữ trực tiếp). */
-  const patchDraftObject = useCallback((idx: number, objId: string, patch: Partial<SlideObject>) => {
-    setDrafts((prev) => {
-      if (!prev) return prev;
-      return prev.map((d, i) => {
-        if (i !== idx) return d;
-        return { ...d, objects: d.objects.map((o) => (o.id === objId ? { ...o, ...patch } : o)) };
-      });
-    });
-  }, []);
-
   /** Bật/tắt sửa chữ tại chỗ của một slide. */
   const toggleEdit = useCallback((idx: number) => {
+    // Đóng slide đang sửa (hoặc chuyển sang slide khác) → chốt mục hoàn tác
+    // cho đợt gõ vừa rồi; mở slide mới → ghi lại bản nháp trước khi sửa.
+    if (editingIdxRef.current !== null) flushTextEditUndo();
+    if (editingIdxRef.current !== idx) {
+      editSnapRef.current = { snap: snapshotDrafts() };
+    }
     setEditingIdx((cur) => (cur === idx ? null : idx));
   }, []);
 
@@ -885,10 +1119,17 @@ export function SimpleSectionEditor() {
    */
   const deleteDraft = useCallback((idx: number) => {
     if (!window.confirm(`Xóa slide ${idx + 1} khỏi bản nháp?`)) return;
+    const snap = snapshotDrafts();
     basesRef.current = basesRef.current.filter((_, i) => i !== idx);
     setDraftScales((prev) => prev.filter((_, i) => i !== idx));
     setDrafts((prev) => (prev ? prev.filter((_, i) => i !== idx) : prev));
     setEditingIdx(null);
+    pushEditorUndo({
+      label: 'Xóa slide nháp',
+      run: async () => {
+        restoreDraftSnap(snap);
+      },
+    });
   }, []);
 
   /** Lưu: cập nhật slide cũ theo vị trí, thêm mới nếu thừa, xóa bớt nếu dư. */
@@ -898,6 +1139,18 @@ export function SimpleSectionEditor() {
       return;
     }
     if (!programId || !sectionId) return;
+    // Ảnh chụp slide ĐÃ LƯU trước khi lưu — để hoàn tác trả lại đúng trạng thái cũ.
+    const prevSlides = [...slides]
+      .sort((a, b) => a.order_index - b.order_index)
+      .map((s) => ({
+        id: s.id,
+        program_id: s.program_id,
+        section_id: s.section_id,
+        order_index: s.order_index,
+        content: JSON.parse(JSON.stringify(s.content)) as Slide['content'],
+        background: JSON.parse(JSON.stringify(s.background)) as Slide['background'],
+      }));
+    const prevTitle = section?.title ?? '';
     setBusy(true);
     try {
       const ordered = [...slides].sort((a, b) => a.order_index - b.order_index);
@@ -953,6 +1206,47 @@ export function SimpleSectionEditor() {
         .eq('section_id', sectionId)
         .order('order_index');
       setSlides(((data ?? []) as Slide[]).sort((a, b) => a.order_index - b.order_index));
+      pushEditorUndo({
+        label: 'Lưu nội dung mục',
+        run: async () => {
+          // Trả lại đúng slide cũ: xóa hết slide hiện tại rồi chèn lại bản cũ.
+          const { error: delErr } = await supabase
+            .from('slides')
+            .delete()
+            .eq('section_id', sectionId);
+          if (delErr)
+            throw new Error(
+              `Không xóa được slide hiện tại (cần quyền Quản trị viên): ${delErr.message}`,
+            );
+          if (prevSlides.length > 0) {
+            const { error: insErr } = await supabase.from('slides').insert(prevSlides);
+            if (insErr) throw new Error(`Khôi phục slide cũ lỗi: ${insErr.message}`);
+          }
+          if (section && prevTitle !== section.title) {
+            const { error: tErr } = await supabase
+              .from('sections')
+              .update({ title: prevTitle })
+              .eq('id', sectionId);
+            if (tErr) throw new Error(`Khôi phục tên mục lỗi: ${tErr.message}`);
+            setSection({ ...section, title: prevTitle });
+            setSecTitle(prevTitle);
+          }
+          setSlides(
+            prevSlides.map((s) => ({
+              ...s,
+              content: s.content,
+              background: s.background,
+            })) as Slide[],
+          );
+          const asDrafts: SlideDraft[] = prevSlides.map((s) => ({
+            objects: s.content.objects.map((o) => ({ ...o })),
+            background: s.background,
+          }));
+          basesRef.current = asDrafts.map((d) => d.objects.map((o) => o.fontSize ?? 0));
+          setDraftScales(asDrafts.map(() => 1));
+          setDrafts(asDrafts);
+        },
+      });
       toast('Đã lưu nội dung mục.', 'success');
     } catch (e) {
       toast((e as Error).message, 'error');
@@ -966,7 +1260,20 @@ export function SimpleSectionEditor() {
     if (!window.confirm(`Sao chép mục “${section.title}” kèm toàn bộ slide?`)) return;
     setBusy(true);
     try {
-      await duplicateSimpleSection(supabase, programId, section, slides);
+      const newId = await duplicateSimpleSection(supabase, programId, section, slides);
+      pushEditorUndo({
+        label: `Nhân bản mục “${section.title}”`,
+        run: async ({ go }) => {
+          const { error: slErr } = await supabase
+            .from('slides')
+            .delete()
+            .eq('section_id', newId);
+          if (slErr) throw new Error(`Không xóa được slide bản sao: ${slErr.message}`);
+          const { error: sErr } = await supabase.from('sections').delete().eq('id', newId);
+          if (sErr) throw new Error(`Xóa bản sao lỗi: ${sErr.message}`);
+          go(`/p/${programId}`);
+        },
+      });
       toast('Đã sao chép mục.', 'success');
       navigate(`/p/${programId}`);
     } catch (e) {
@@ -981,14 +1288,99 @@ export function SimpleSectionEditor() {
     if (!window.confirm(`Xóa mục “${section.title}” và toàn bộ ${slides.length} slide của nó?`)) return;
     setBusy(true);
     try {
+      const sectionSnap = { ...section };
+      const slidesSnap = slides.map((s) => ({
+        id: s.id,
+        program_id: s.program_id,
+        section_id: s.section_id,
+        order_index: s.order_index,
+        content: JSON.parse(JSON.stringify(s.content)) as Slide['content'],
+        background: JSON.parse(JSON.stringify(s.background)) as Slide['background'],
+      }));
       const { error: slErr } = await supabase.from('slides').delete().eq('section_id', sectionId);
       if (slErr) throw new Error(`Không xóa được slide (cần quyền Quản trị viên): ${slErr.message}`);
       const { error: sErr } = await supabase.from('sections').delete().eq('id', sectionId);
       if (sErr) throw new Error(`Xóa mục lỗi: ${sErr.message}`);
+      pushEditorUndo({
+        label: `Xóa mục “${section.title}”`,
+        run: async () => {
+          const { error: e2 } = await supabase.from('sections').insert({
+            id: sectionSnap.id,
+            program_id: sectionSnap.program_id,
+            title: sectionSnap.title,
+            kind: sectionSnap.kind,
+            order_index: sectionSnap.order_index,
+          });
+          if (e2) throw new Error(`Khôi phục mục lỗi: ${e2.message}`);
+          if (slidesSnap.length > 0) {
+            const { error: e3 } = await supabase.from('slides').insert(slidesSnap);
+            if (e3) throw new Error(`Khôi phục slide lỗi: ${e3.message}`);
+          }
+        },
+      });
       toast('Đã xóa mục.', 'success');
       navigate(`/p/${programId}`);
     } catch (e) {
       toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * Lưu mục đang sửa (bài hát / bài đọc) vào Thư viện để dùng lại cho mọi
+   * chương trình: copy nguyên slide đã làm sẵn. Lấy slide ĐÃ LƯU nếu có, nếu
+   * chưa lưu thì lấy bản nháp đang hiện. Hoàn tác = xóa bản copy trong Thư viện.
+   */
+  const saveToLibrary = async () => {
+    if (!programId || !program || !section) return;
+    if (editorType !== 'lyrics' && editorType !== 'bible') return;
+    if (!user) {
+      toast('Chưa đăng nhập.', 'error');
+      return;
+    }
+    setBusy(true);
+    try {
+      const source =
+        slides.length > 0
+          ? [...slides]
+              .sort((a, b) => a.order_index - b.order_index)
+              .map((s, i) => ({
+                order_index: s.order_index ?? i,
+                content: s.content,
+                background: s.background,
+              }))
+          : (drafts ?? []).map((d, i) => ({
+              order_index: i,
+              content: { objects: d.objects },
+              background: d.background,
+            }));
+      if (source.length === 0) {
+        toast('Mục chưa có slide nào để lưu vào thư viện.', 'error');
+        return;
+      }
+      const libSectionId = await saveSectionToLibrary(
+        supabase,
+        program.church_id,
+        user.id,
+        { title: section.title, kind: section.kind },
+        source,
+      );
+      pushEditorUndo({
+        label: `Lưu vào thư viện “${section.title}”`,
+        run: async () => {
+          const { error: slErr } = await supabase
+            .from('slides')
+            .delete()
+            .eq('section_id', libSectionId);
+          if (slErr) throw new Error(`Không xóa được slide trong thư viện: ${slErr.message}`);
+          const { error: sErr } = await supabase.from('sections').delete().eq('id', libSectionId);
+          if (sErr) throw new Error(`Xóa khỏi thư viện lỗi: ${sErr.message}`);
+        },
+      });
+      toast('Đã lưu vào thư viện — mở Thư viện để xem lại.', 'success');
+    } catch (e) {
+      toast(`Lưu vào thư viện lỗi: ${(e as Error).message}`, 'error');
     } finally {
       setBusy(false);
     }
@@ -1035,6 +1427,19 @@ export function SimpleSectionEditor() {
           🗑 Xóa mục
         </button>
       </div>
+
+      {/* Lưu bài hát / bài đọc vào Thư viện để dùng lại cho mọi chương trình */}
+      {(editorType === 'lyrics' || editorType === 'bible') && (
+        <div className="mb-3">
+          <button
+            onClick={() => void saveToLibrary()}
+            disabled={busy}
+            className="flex min-h-[52px] w-full items-center justify-center gap-1 rounded-2xl border border-violet-900/50 bg-[#1b1e22] px-2 text-sm font-bold text-violet-300 disabled:opacity-50"
+          >
+            📚 Lưu vào thư viện
+          </button>
+        </div>
+      )}
 
       {/* Form theo loại mục */}
       <div className="rounded-2xl border border-white/5 bg-[#16181c] p-4">

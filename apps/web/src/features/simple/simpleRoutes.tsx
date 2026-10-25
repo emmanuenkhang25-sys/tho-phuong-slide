@@ -5,6 +5,15 @@ import { SimpleProgramList } from './SimpleProgramList';
 import { SimpleProgramPage } from './SimpleProgramPage';
 import { SimpleSectionEditor } from './SimpleSectionEditor';
 import { LibraryPage } from './LibraryPage';
+import { UndoBar } from './UndoBar';
+
+/** Thanh Hoàn tác nổi dùng chung — đặt cạnh mọi màn hình đơn giản. */
+const withUndo = (el: React.ReactNode) => (
+  <>
+    {el}
+    <UndoBar />
+  </>
+);
 
 /**
  * Luồng đơn giản (mobile-first, nền tối): sau đăng nhập mở ngay chương trình
@@ -14,42 +23,42 @@ import { LibraryPage } from './LibraryPage';
 export const simpleRoutes: RouteObject[] = [
   {
     path: '/bat-dau',
-    element: (
+    element: withUndo(
       <RequireAuth>
         <OpenLatest />
-      </RequireAuth>
+      </RequireAuth>,
     ),
   },
   {
     path: '/p',
-    element: (
+    element: withUndo(
       <RequireAuth>
         <SimpleProgramList />
-      </RequireAuth>
+      </RequireAuth>,
     ),
   },
   {
     path: '/p/:id',
-    element: (
+    element: withUndo(
       <RequireAuth>
         <SimpleProgramPage />
-      </RequireAuth>
+      </RequireAuth>,
     ),
   },
   {
     path: '/p/:id/muc/:sectionId',
-    element: (
+    element: withUndo(
       <RequireAuth>
         <SimpleSectionEditor />
-      </RequireAuth>
+      </RequireAuth>,
     ),
   },
   {
     path: '/thu-vien',
-    element: (
+    element: withUndo(
       <RequireAuth>
         <LibraryPage />
-      </RequireAuth>
+      </RequireAuth>,
     ),
   },
 ];

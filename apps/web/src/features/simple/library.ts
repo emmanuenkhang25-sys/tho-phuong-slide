@@ -7,7 +7,7 @@
 // Chương trình Thư viện được giấu khỏi danh sách chương trình và khỏi /bat-dau.
 // ============================================================================
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Section, Slide } from '../../lib/types';
+import type { Section, Slide, SlideBackground, SlideObject } from '../../lib/types';
 import { uuid } from '../editor/lib/editorUtils';
 import { sectionEditorType } from './sectionForms';
 
@@ -134,4 +134,71 @@ export function foldVi(s: string): string {
     .replace(/\u0111/g, 'd')
     .replace(/\u0110/g, 'D')
     .toLowerCase();
+}
+
+/**
+ * Tìm trong Thư viện theo tên bài / tham chiếu (không dấu, tối đa 6 kết quả).
+ * Dùng chung cho gợi ý khi gõ trong trình sửa mục và ô tìm trên trang Thư viện.
+ */
+export function matchLibraryItems(
+  items: LibraryItem[],
+  query: string,
+  kind: 'lyrics' | 'bible',
+): LibraryItem[] {
+  const q = foldVi(query.trim());
+  if (q === '') return [];
+  return items.filter((it) => it.kind === kind && foldVi(it.matchText).includes(q)).slice(0, 6);
+}
+
+/** Một slide nguồn để lưu vào Thư viện (slide đã lưu, hoặc bản nháp chưa lưu). */
+export interface LibrarySourceSlide {
+  order_index: number;
+  content: { objects: SlideObject[] };
+  background: SlideBackground;
+}
+
+/**
+ * Lưu một mục (bài hát / bài đọc) vào Thư viện: tạo mục mới trong chương trình
+ * Thư viện rồi copy nguyên slide sang (id mới — slide gốc vẫn ở chương trình).
+ * Trả về id mục mới trong Thư viện (để hoàn tác: xóa mục đó là xong).
+ */
+export async function saveSectionToLibrary(
+  supabase: SupabaseClient,
+  churchId: string,
+  userId: string,
+  section: { title: string; kind: string },
+  slides: LibrarySourceSlide[],
+): Promise<string> {
+  const lib = await ensureLibraryProgram(supabase, churchId, userId);
+  const { data: secs } = await supabase
+    .from('sections')
+    .select('id,order_index')
+    .eq('program_id', lib.id)
+    .order('order_index');
+  const orderIndex =
+    (secs ?? []).length > 0
+      ? Math.max(...((secs ?? []) as { order_index: number }[]).map((s) => s.order_index)) + 1
+      : 0;
+  const sectionId = uuid();
+  const { error: sErr } = await supabase.from('sections').insert({
+    id: sectionId,
+    program_id: lib.id,
+    title: section.title,
+    kind: section.kind,
+    order_index: orderIndex,
+  });
+  if (sErr) throw new Error(sErr.message);
+  if (slides.length > 0) {
+    const rows = slides.map((s, i) => ({
+      id: uuid(),
+      program_id: lib.id,
+      section_id: sectionId,
+      order_index: s.order_index ?? i,
+      content: JSON.parse(JSON.stringify(s.content)) as { objects: SlideObject[] },
+      background: JSON.parse(JSON.stringify(s.background)) as SlideBackground,
+    }));
+    const { error: slErr } = await supabase.from('slides').insert(rows);
+    if (slErr) throw new Error(slErr.message);
+  }
+  return sectionId;
 }

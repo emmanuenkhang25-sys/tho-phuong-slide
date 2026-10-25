@@ -18,6 +18,7 @@ import { uuid } from '../editor/lib/editorUtils';
 import { sectionFormHint } from './sectionForms';
 import { createSimpleProgram, duplicateSimpleSection } from './programApi';
 import { formatDate } from '../../lib/format';
+import { pushUndo, useUndoStore } from './undoStore';
 
 export function SimpleProgramPage() {
   const { id } = useParams<{ id: string }>();
@@ -41,6 +42,8 @@ export function SimpleProgramPage() {
   const [newKind, setNewKind] = useState('custom');
   const [showPreview, setShowPreview] = useState(false);
   const [exporting, setExporting] = useState(false);
+  /** Số lần hoàn tác thành công — tải lại chương trình để khớp dữ liệu sau hoàn tác. */
+  const undoSeq = useUndoStore((s) => s.seq);
 
   useEffect(() => {
     void ensureChurchLoaded();
@@ -80,7 +83,7 @@ export function SimpleProgramPage() {
       setLoading(false);
     };
     void load();
-  }, [id]);
+  }, [id, undoSeq]);
 
   const slideCountOf = useMemo(() => {
     const m = new Map<string, number>();
@@ -101,6 +104,8 @@ export function SimpleProgramPage() {
   const saveHeader = async () => {
     if (!program || !id) return;
     setBusy(true);
+    const oldTitle = program.title;
+    const oldDate = program.event_date;
     const { error } = await supabase
       .from('programs')
       .update({ title: title.trim() || program.title, event_date: eventDate || null })
@@ -112,6 +117,19 @@ export function SimpleProgramPage() {
     }
     setProgram({ ...program, title: title.trim() || program.title, event_date: eventDate || null });
     setShowEditHeader(false);
+    pushUndo({
+      label: 'Lưu tiêu đề chương trình',
+      run: async () => {
+        const { error: e2 } = await supabase
+          .from('programs')
+          .update({ title: oldTitle, event_date: oldDate })
+          .eq('id', id);
+        if (e2) throw e2;
+        setProgram((prev) => (prev ? { ...prev, title: oldTitle, event_date: oldDate } : prev));
+        setTitle(oldTitle);
+        setEventDate(oldDate ?? '');
+      },
+    });
     toast('Đã lưu chương trình.', 'success');
   };
 
@@ -121,6 +139,7 @@ export function SimpleProgramPage() {
     if (j < 0 || j >= sections.length) return;
     const a = sections[index];
     const b = sections[j];
+    const prev = sections;
     const next = [...sections];
     next[index] = { ...b, order_index: index };
     next[j] = { ...a, order_index: j };
@@ -138,7 +157,20 @@ export function SimpleProgramPage() {
     if (error) {
       toast(`Đổi thứ tự lỗi: ${error.message}`, 'error');
       void reloadSections();
+      return;
     }
+    pushUndo({
+      label: 'Đổi thứ tự mục',
+      run: async () => {
+        const res = await Promise.all([
+          supabase.from('sections').update({ order_index: a.order_index }).eq('id', a.id),
+          supabase.from('sections').update({ order_index: b.order_index }).eq('id', b.id),
+        ]);
+        const e2 = res.find((r) => r.error)?.error;
+        if (e2) throw e2;
+        setSections(prev);
+      },
+    });
   };
 
   const reloadSections = async () => {
@@ -166,9 +198,43 @@ export function SimpleProgramPage() {
     if (!id) return;
     setBusy(true);
     try {
-      await duplicateSimpleSection(supabase, id, s, slides);
+      const newId = await duplicateSimpleSection(supabase, id, s, slides);
       await reloadSections();
       await reloadSlides();
+      pushUndo({
+        label: `Nhân bản mục “${s.title}”`,
+        run: async () => {
+          // Xóa bản sao + dồn lại các mục đứng sau nó (khoảng trống thứ tự vô hại
+          // nhưng dồn lại cho gọn); trang tự tải lại nhờ seq sau hoàn tác.
+          const { data: copy } = await supabase
+            .from('sections')
+            .select('id,order_index')
+            .eq('id', newId)
+            .single();
+          const { error: slErr } = await supabase
+            .from('slides')
+            .delete()
+            .eq('section_id', newId);
+          if (slErr) throw new Error(`Không xóa được slide bản sao: ${slErr.message}`);
+          const { error: sErr } = await supabase.from('sections').delete().eq('id', newId);
+          if (sErr) throw new Error(`Xóa bản sao lỗi: ${sErr.message}`);
+          if (copy) {
+            const { data: later } = await supabase
+              .from('sections')
+              .select('id,order_index')
+              .eq('program_id', id)
+              .gt('order_index', (copy as { order_index: number }).order_index);
+            await Promise.all(
+              ((later ?? []) as { id: string; order_index: number }[]).map((row) =>
+                supabase
+                  .from('sections')
+                  .update({ order_index: row.order_index - 1 })
+                  .eq('id', row.id),
+              ),
+            );
+          }
+        },
+      });
       toast(`Đã nhân bản “${s.title}” — mở bản sao để nhập bài hát mới.`, 'success');
     } catch (e) {
       toast(`Nhân bản lỗi: ${(e as Error).message}`, 'error');
@@ -194,6 +260,14 @@ export function SimpleProgramPage() {
           sections.length > 0 ? Math.max(...sections.map((s) => s.order_index)) + 1 : 0,
       });
       if (error) throw new Error(`Thêm bài hát lỗi: ${error.message}`);
+      pushUndo({
+        label: 'Thêm bài hát mới',
+        run: async ({ go }) => {
+          const { error: e2 } = await supabase.from('sections').delete().eq('id', newId);
+          if (e2) throw e2;
+          go(`/p/${id}`);
+        },
+      });
       navigate(`/p/${id}/muc/${newId}`);
     } catch (e) {
       toast((e as Error).message, 'error');
@@ -227,6 +301,14 @@ export function SimpleProgramPage() {
     setNewName('');
     setNewKind('custom');
     setShowAdd(false);
+    pushUndo({
+      label: `Thêm mục “${row.title}”`,
+      run: async () => {
+        const { error: e2 } = await supabase.from('sections').delete().eq('id', row.id);
+        if (e2) throw e2;
+        setSections((xs) => xs.filter((x) => x.id !== row.id));
+      },
+    });
     toast('Đã thêm mục mới.', 'success');
   };
 
@@ -237,12 +319,40 @@ export function SimpleProgramPage() {
     if (!window.confirm(`Xóa mục “${s.title}”${n > 0 ? ` và ${n} slide` : ''} của nó?`)) return;
     setBusy(true);
     try {
+      const sectionSnap = { ...s };
+      const slidesSnap = slides
+        .filter((sl) => sl.section_id === s.id)
+        .map((sl) => ({
+          id: sl.id,
+          program_id: sl.program_id,
+          section_id: sl.section_id,
+          order_index: sl.order_index,
+          content: JSON.parse(JSON.stringify(sl.content)) as Slide['content'],
+          background: JSON.parse(JSON.stringify(sl.background)) as Slide['background'],
+        }));
       const { error: slErr } = await supabase.from('slides').delete().eq('section_id', s.id);
       if (slErr)
         throw new Error(`Không xóa được slide (cần quyền Quản trị viên): ${slErr.message}`);
       const { error: sErr } = await supabase.from('sections').delete().eq('id', s.id);
       if (sErr) throw new Error(`Xóa mục lỗi: ${sErr.message}`);
       setSections((xs) => xs.filter((x) => x.id !== s.id).map((x, i) => ({ ...x, order_index: i })));
+      pushUndo({
+        label: `Xóa mục “${s.title}”`,
+        run: async () => {
+          const { error: e2 } = await supabase.from('sections').insert({
+            id: sectionSnap.id,
+            program_id: sectionSnap.program_id,
+            title: sectionSnap.title,
+            kind: sectionSnap.kind,
+            order_index: sectionSnap.order_index,
+          });
+          if (e2) throw new Error(`Khôi phục mục lỗi: ${e2.message}`);
+          if (slidesSnap.length > 0) {
+            const { error: e3 } = await supabase.from('slides').insert(slidesSnap);
+            if (e3) throw new Error(`Khôi phục slide lỗi: ${e3.message}`);
+          }
+        },
+      });
       toast('Đã xóa mục.', 'success');
     } catch (e) {
       toast((e as Error).message, 'error');
@@ -264,6 +374,17 @@ export function SimpleProgramPage() {
         churchId: currentChurch.id,
         userId: user.id,
         templateId: 'chu-nhat',
+      });
+      pushUndo({
+        label: 'Tạo chương trình Chúa Nhật mới',
+        run: async ({ go }) => {
+          const { error } = await supabase
+            .from('programs')
+            .update({ status: 'deleted' })
+            .eq('id', pid);
+          if (error) throw error;
+          go('/p');
+        },
       });
       toast('Đã tạo chương trình Chúa Nhật mới.', 'success');
       navigate(`/p/${pid}`);
@@ -314,6 +435,63 @@ export function SimpleProgramPage() {
     );
   }
   if (!program) return null;
+
+  /** Khôi phục chương trình đang xem (đang ở trạng thái đã xóa mềm). */
+  const restoreProgram = async () => {
+    if (!id) return;
+    setBusy(true);
+    try {
+      const { error } = await supabase
+        .from('programs')
+        .update({ status: 'draft' })
+        .eq('id', id);
+      if (error) throw error;
+      setProgram({ ...program, status: 'draft' });
+      pushUndo({
+        label: `Khôi phục chương trình “${program.title}”`,
+        run: async ({ go }) => {
+          const { error: e2 } = await supabase
+            .from('programs')
+            .update({ status: 'deleted' })
+            .eq('id', id);
+          if (e2) throw e2;
+          go('/p');
+        },
+      });
+      toast('Đã khôi phục chương trình.', 'success');
+    } catch (e) {
+      toast(`Khôi phục lỗi: ${(e as Error).message}`, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (program.status === 'deleted') {
+    return (
+      <div className="mx-auto flex min-h-screen w-full max-w-xl flex-col bg-[#0e0f11] px-4 pb-10 pt-3 text-slate-100">
+        <div className="mt-10 rounded-2xl border border-white/5 bg-[#16181c] p-6 text-center">
+          <p className="mb-2 text-4xl">🗑</p>
+          <p className="mb-2 text-lg font-bold text-white">Chương trình này đã bị xóa.</p>
+          <p className="mb-4 text-sm text-slate-400">
+            Chương trình chỉ bị ẩn đi, vẫn khôi phục lại nguyên vẹn được.
+          </p>
+          <button
+            onClick={() => void restoreProgram()}
+            disabled={busy}
+            className="mb-2 flex min-h-[52px] w-full items-center justify-center rounded-2xl bg-amber-500 font-bold text-black disabled:opacity-50"
+          >
+            ↩ Khôi phục chương trình
+          </button>
+          <button
+            onClick={() => navigate('/p')}
+            className="flex min-h-[52px] w-full items-center justify-center rounded-2xl border border-white/10 font-bold text-slate-200"
+          >
+            Về danh sách
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const rowDesc = (s: Section) => {
     const hint = sectionFormHint(s.kind);

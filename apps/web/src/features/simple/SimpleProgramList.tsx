@@ -14,6 +14,13 @@ import { PROGRAM_TEMPLATES } from '../templates/programTemplates';
 import { cloneSimpleProgram, createSimpleProgram } from './programApi';
 import { isLibraryProgram } from './library';
 import { formatDate } from '../../lib/format';
+import { pushUndo, useUndoStore } from './undoStore';
+import {
+  clearDeletedProgram,
+  readDeletedProgram,
+  writeDeletedProgram,
+  type DeletedProgramRecord,
+} from './deletedPrograms';
 
 interface ProgramRow {
   id: string;
@@ -21,6 +28,7 @@ interface ProgramRow {
   title: string;
   event_date: string | null;
   updated_at: string;
+  status: string;
 }
 
 export function SimpleProgramList() {
@@ -32,6 +40,8 @@ export function SimpleProgramList() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [showChoice, setShowChoice] = useState(false);
+  /** Số lần hoàn tác thành công — tải lại danh sách để khớp dữ liệu sau hoàn tác. */
+  const undoSeq = useUndoStore((s) => s.seq);
 
   useEffect(() => {
     void ensureChurchLoaded();
@@ -48,7 +58,7 @@ export function SimpleProgramList() {
       setLoading(true);
       const { data } = await supabase
         .from('programs')
-        .select('id,church_id,title,event_date,updated_at,design_template')
+        .select('id,church_id,title,event_date,updated_at,status,design_template')
         .eq('church_id', currentChurch.id)
         .neq('status', 'deleted')
         .order('updated_at', { ascending: false })
@@ -59,10 +69,44 @@ export function SimpleProgramList() {
           (p) => !isLibraryProgram(p),
         ),
       );
+      // Có chương trình vừa xóa chưa hoàn tác (ghi chú còn trong localStorage)
+      // mà thanh Hoàn tác đang trống → dựng lại mục hoàn tác cho nó.
+      const rec = readDeletedProgram();
+      if (rec && !useUndoStore.getState().entry) {
+        pushUndo({
+          label: `Xóa chương trình “${rec.title}”`,
+          run: async () => {
+            await restoreDeletedProgram(rec);
+          },
+          onDismiss: () => clearDeletedProgram(),
+        });
+      }
       setLoading(false);
     };
     void load();
-  }, [churchLoading, currentChurch?.id]);
+  }, [churchLoading, currentChurch?.id, undoSeq]);
+
+  /** Khôi phục chương trình vừa xóa mềm (đổi status về như cũ + hiện lại trong danh sách). */
+  const restoreDeletedProgram = async (rec: DeletedProgramRecord) => {
+    const { error } = await supabase
+      .from('programs')
+      .update({ status: rec.status || 'draft' })
+      .eq('id', rec.id);
+    if (error) throw error;
+    const { data } = await supabase
+      .from('programs')
+      .select('id,church_id,title,event_date,updated_at,status,design_template')
+      .eq('id', rec.id)
+      .single();
+    if (!data) throw new Error('Không tìm thấy chương trình để khôi phục.');
+    if (!isLibraryProgram(data)) {
+      setPrograms((xs) => [
+        data as ProgramRow,
+        ...xs.filter((x) => x.id !== rec.id),
+      ]);
+    }
+    clearDeletedProgram();
+  };
 
   const doCreate = async (templateId: string | null) => {
     if (!currentChurch || !user) return;
@@ -74,6 +118,17 @@ export function SimpleProgramList() {
         templateId,
       });
       setShowChoice(false);
+      pushUndo({
+        label: 'Tạo chương trình mới',
+        run: async ({ go }) => {
+          const { error } = await supabase
+            .from('programs')
+            .update({ status: 'deleted' })
+            .eq('id', id);
+          if (error) throw error;
+          go('/p');
+        },
+      });
       toast('Đã tạo chương trình mới.', 'success');
       navigate(`/p/${id}`);
     } catch (e) {
@@ -91,13 +146,59 @@ export function SimpleProgramList() {
       const id = await cloneSimpleProgram(supabase, p, user.id);
       const { data } = await supabase
         .from('programs')
-        .select('id,church_id,title,event_date,updated_at')
+        .select('id,church_id,title,event_date,updated_at,status')
         .eq('id', id)
         .single();
       if (data) setPrograms((xs) => [data as ProgramRow, ...xs]);
+      pushUndo({
+        label: `Nhân bản chương trình “${p.title}”`,
+        run: async () => {
+          const { error } = await supabase
+            .from('programs')
+            .update({ status: 'deleted' })
+            .eq('id', id);
+          if (error) throw error;
+          setPrograms((xs) => xs.filter((x) => x.id !== id));
+        },
+      });
       toast('Đã sao chép chương trình.', 'success');
     } catch (e) {
       toast(`Sao chép lỗi: ${(e as Error).message}`, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * Xóa mềm một chương trình (chỉ đổi status thành 'deleted' — danh sách và
+   * /bat-dau đều đã lọc trạng thái này nên chương trình biến mất ngay, nhưng
+   * vẫn cứu được bằng nút Hoàn tác; không hỏi xác nhận vì đã có hoàn tác).
+   */
+  const doDelete = async (p: ProgramRow) => {
+    setBusy(true);
+    try {
+      const { error } = await supabase
+        .from('programs')
+        .update({ status: 'deleted' })
+        .eq('id', p.id);
+      if (error) throw error;
+      const rec: DeletedProgramRecord = {
+        id: p.id,
+        title: p.title,
+        status: p.status || 'draft',
+      };
+      setPrograms((xs) => xs.filter((x) => x.id !== p.id));
+      writeDeletedProgram(rec);
+      pushUndo({
+        label: `Xóa chương trình “${p.title}”`,
+        run: async () => {
+          await restoreDeletedProgram(rec);
+        },
+        onDismiss: () => clearDeletedProgram(),
+      });
+      toast('Đã xóa chương trình.', 'success');
+    } catch (e) {
+      toast(`Xóa chương trình lỗi: ${(e as Error).message}`, 'error');
     } finally {
       setBusy(false);
     }
@@ -190,6 +291,15 @@ export function SimpleProgramList() {
                 className="flex min-h-[48px] min-w-[48px] items-center justify-center rounded-xl border border-white/10 text-lg text-slate-300 disabled:opacity-50"
               >
                 ⧉
+              </button>
+              <button
+                onClick={() => void doDelete(p)}
+                disabled={busy}
+                title="Xóa chương trình"
+                aria-label={`Xóa ${p.title}`}
+                className="flex min-h-[48px] min-w-[48px] items-center justify-center rounded-xl border border-white/10 text-lg text-slate-300 disabled:opacity-50"
+              >
+                🗑
               </button>
             </li>
           ))}
