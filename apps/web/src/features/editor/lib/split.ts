@@ -297,16 +297,64 @@ export function splitLyrics(
 // ------------------------------------------------------------
 /** Đầu câu Kinh Thánh: số câu ở đầu dòng (hoặc đầu văn bản), theo sau là "." / ")" / khoảng trắng. */
 const VERSE_RE = /(^|\n)[ \t]*(\d{1,3})(?:[.)][ \t]*|[ \t]+)/g;
+/** Số câu nằm giữa đoạn (dạng dán từ web/app Kinh Thánh: "...nô lệ. 3 Trước mặt ta..."):
+    sau dấu câu + khoảng trắng, trước chữ hoa. Chỉ giữ khi nối tiếp số câu trước
+    (hoặc mở đầu một chuỗi liên tiếp) để không tách nhầm số lượng trong câu văn
+    (VD: "Ngài phán. 5 người đến" — "người" viết thường nên không nhận). */
+const VERSE_INLINE_RE = /(?<=[.:\u2026;!?]\s*)(\d{1,3})(?:[.)])?\s+(?=\p{Lu})/gu;
 
 interface Verse {
   n: number | null;
   text: string;
 }
 
+interface VerseMarker {
+  /** Vị trí bắt đầu của số câu. */
+  pos: number;
+  /** Vị trí kết thúc của cụm đánh dấu (sau số + dấu + khoảng trắng). */
+  end: number;
+  n: number;
+  /** Đánh dấu ở đầu dòng (luôn giữ) hay giữa đoạn (chỉ giữ khi nối tiếp). */
+  inline: boolean;
+}
+
 function parseVerses(text: string): Verse[] {
   const norm = text.replace(/\r\n?/g, '\n');
-  const matches = [...norm.matchAll(VERSE_RE)];
-  if (matches.length === 0) {
+  const byPos = new Map<number, VerseMarker>();
+  for (const m of norm.matchAll(VERSE_RE)) {
+    const base = m.index ?? 0;
+    const pos = base + m[0].indexOf(m[2]);
+    if (!byPos.has(pos)) {
+      byPos.set(pos, { pos, end: base + m[0].length, n: parseInt(m[2], 10), inline: false });
+    }
+  }
+  for (const m of norm.matchAll(VERSE_INLINE_RE)) {
+    const pos = m.index ?? 0;
+    if (!byPos.has(pos)) {
+      byPos.set(pos, { pos, end: pos + m[0].length, n: parseInt(m[1], 10), inline: true });
+    }
+  }
+  const ordered = [...byPos.values()].sort((a, b) => a.pos - b.pos);
+  // Giữ mọi đánh dấu đầu dòng; đánh dấu giữa đoạn chỉ giữ khi nối tiếp số câu
+  // trước đó, hoặc khi nó mở đầu một chuỗi liên tiếp (dán bắt đầu từ giữa đoạn).
+  const kept: VerseMarker[] = [];
+  for (let i = 0; i < ordered.length; i++) {
+    const mk = ordered[i];
+    if (!mk.inline) {
+      kept.push(mk);
+      continue;
+    }
+    const last = kept[kept.length - 1];
+    if (last && mk.n === last.n + 1) {
+      kept.push(mk);
+      continue;
+    }
+    if (!last) {
+      const nextInline = ordered.slice(i + 1).find((x) => x.inline);
+      if (nextInline && nextInline.n === mk.n + 1) kept.push(mk);
+    }
+  }
+  if (kept.length === 0) {
     // Không có số câu: mỗi dòng không rỗng là một câu — đoạn dán từ app
     // Kinh Thánh không kèm số, hoặc người dùng gõ mỗi câu một dòng.
     // (Văn bản một dòng duy nhất vẫn là 1 câu như trước.)
@@ -317,15 +365,14 @@ function parseVerses(text: string): Verse[] {
       .map((text) => ({ n: null, text }));
   }
   const verses: Verse[] = [];
-  const preamble = norm.slice(0, matches[0].index ?? 0).trim();
-  for (let i = 0; i < matches.length; i++) {
-    const m = matches[i];
-    const start = (m.index ?? 0) + m[0].length;
-    const end = i + 1 < matches.length ? (matches[i + 1].index ?? norm.length) : norm.length;
+  const preamble = norm.slice(0, kept[0].pos).trim();
+  for (let i = 0; i < kept.length; i++) {
+    const start = kept[i].end;
+    const end = i + 1 < kept.length ? kept[i + 1].pos : norm.length;
     let vt = norm.slice(start, end).trim();
     // Giữ nguyên phần mở đầu (tên sách/chương) kèm vào câu đầu — không bỏ chữ nào.
     if (i === 0 && preamble) vt = `${preamble}\n${vt}`;
-    verses.push({ n: parseInt(m[2], 10), text: vt });
+    verses.push({ n: kept[i].n, text: vt });
   }
   return verses;
 }

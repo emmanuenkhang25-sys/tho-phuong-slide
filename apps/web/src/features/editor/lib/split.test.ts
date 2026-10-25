@@ -198,6 +198,42 @@ describe('splitBible', () => {
     expect(allBodyText([slides[2]])).toContain('Mà được sự sống đời đời.');
   });
 
+  it('đoạn chảy liền (số câu giữa dòng) → mỗi câu 1 slide', () => {
+    const FLOW =
+      '1. Bấy giờ, Đức Chúa Trời phán mọi lời nầy, rằng: 2 Ta là Giê-hô-va Đức Chúa Trời ngươi, ' +
+      'đã rút ngươi ra khỏi xứ Ê-díp-tô, là nhà nô lệ. 3 Trước mặt ta, ngươi chớ có các thần khác. ' +
+      '4 Ngươi chớ làm tượng chạm cho mình. 5 Ngươi chớ quỳ lạy trước các hình tượng đó.';
+    const { slides } = splitBible(FLOW, { versesPerSlide: 1 });
+    expect(slides).toHaveLength(5);
+    expect(slides.map((s) => s.label)).toEqual(['câu 1', 'câu 2', 'câu 3', 'câu 4', 'câu 5']);
+    expect(allBodyText([slides[0]])).toContain('1. Bấy giờ, Đức Chúa Trời phán mọi lời nầy, rằng:');
+    expect(allBodyText([slides[1]])).toContain('2. Ta là Giê-hô-va Đức Chúa Trời ngươi');
+    expect(allBodyText([slides[1]])).not.toContain('Trước mặt ta');
+    expect(allBodyText([slides[2]])).toContain('3. Trước mặt ta, ngươi chớ có các thần khác.');
+    expect(allBodyText([slides[4]])).toContain('5. Ngươi chớ quỳ lạy trước các hình tượng đó.');
+  });
+
+  it('số lượng trong câu văn (sau dấu câu + chữ thường) không bị tách nhầm', () => {
+    const { slides } = splitBible('Ngài phán. 5 người đến rồi đi.', { versesPerSlide: 1 });
+    expect(slides).toHaveLength(1);
+  });
+
+  it('một số câu lẻ giữa đoạn, không nối tiếp → không tách', () => {
+    const { slides } = splitBible('Đoạn này chép rằng. 5 Người ấy đi rồi.', { versesPerSlide: 1 });
+    expect(slides).toHaveLength(1);
+  });
+
+  it('dán bắt đầu từ giữa đoạn: chuỗi câu liên tiếp vẫn tách', () => {
+    const { slides } = splitBible(
+      'Đoạn này chép rằng. 5 Ngươi chớ làm tượng chạm. 6 Ngươi chớ quỳ lạy.',
+      { versesPerSlide: 1 },
+    );
+    expect(slides).toHaveLength(2);
+    expect(slides[0].label).toBe('câu 5');
+    expect(slides[1].label).toBe('câu 6');
+    expect(allBodyText([slides[1]])).toContain('6. Ngươi chớ quỳ lạy.');
+  });
+
   it('input rỗng → không có slide', () => {
     expect(splitBible('  \n ').slides).toHaveLength(0);
   });
